@@ -41,7 +41,7 @@ function loadConfig(env = process.env) {
 
   return Object.freeze({
     nodeEnv, isProd,
-    port: num(env.PORT, 8787), host: env.HOST || (isProd || isRender ? '0.0.0.0' : '127.0.0.1'),
+    port: num(env.PORT, 8787), host: (env.HOST && env.HOST !== '127.0.0.1') ? env.HOST : '0.0.0.0',
     trustProxy: num(env.TRUST_PROXY, (isProd || isRender ? 1 : 0)),
     timezone: env.APP_TIMEZONE || 'Asia/Kolkata',
     mongoUri: env.MONGODB_URI,

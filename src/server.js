@@ -32,7 +32,9 @@ async function main() {
   server.headersTimeout = 65_000;
   const io = require('./socket').attach(server);
 
-  server.listen(cfg.port, cfg.host, () => logger.info('server.listening', { port: cfg.port, host: cfg.host, env: cfg.nodeEnv }));
+  const port = Number(process.env.PORT) || cfg.port;
+  const host = (cfg.host && cfg.host !== '127.0.0.1') ? cfg.host : '0.0.0.0';
+  server.listen(port, host, () => logger.info('server.listening', { port, host, env: cfg.nodeEnv }));
   const tmpTimer = setInterval(() => sweepTmp().catch(() => {}), 3600e3); tmpTimer.unref();
 
   let closing = false;
