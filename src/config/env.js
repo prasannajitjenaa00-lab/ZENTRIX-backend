@@ -10,6 +10,7 @@ function loadConfig(env = process.env) {
   const problems = [];
   const nodeEnv = env.NODE_ENV || 'development';
   const isProd = nodeEnv === 'production';
+  const isRender = Boolean(env.RENDER);
   const need = (k) => { if (!env[k]) problems.push(`${k} is required.`); return env[k]; };
 
   let encKey; let pepper;
@@ -40,8 +41,8 @@ function loadConfig(env = process.env) {
 
   return Object.freeze({
     nodeEnv, isProd,
-    port: num(env.PORT, 8787), host: env.HOST || (isProd ? '0.0.0.0' : '127.0.0.1'),
-    trustProxy: num(env.TRUST_PROXY, 0),
+    port: num(env.PORT, 8787), host: env.HOST || (isProd || isRender ? '0.0.0.0' : '127.0.0.1'),
+    trustProxy: num(env.TRUST_PROXY, (isProd || isRender ? 1 : 0)),
     timezone: env.APP_TIMEZONE || 'Asia/Kolkata',
     mongoUri: env.MONGODB_URI,
     frontendOrigin,
