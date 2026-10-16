@@ -19,8 +19,12 @@ function loadConfig(env = process.env) {
   if (pepperRaw.length < 32) problems.push('TOKEN_PEPPER must be at least 32 characters.'); else pepper = pepperRaw;
 
   const frontendUrl = need('FRONTEND_URL');
-  let frontendOrigin = frontendUrl;
-  try { frontendOrigin = new URL(frontendUrl).origin; } catch { if (frontendUrl) problems.push('FRONTEND_URL must be a valid URL.'); }
+  const urls = (frontendUrl || '').split(',').map((u) => u.trim()).filter(Boolean);
+  const frontendOrigins = [];
+  for (const u of urls) {
+    try { frontendOrigins.push(new URL(u).origin); } catch { if (frontendUrl) problems.push('FRONTEND_URL must be a valid URL.'); }
+  }
+  const frontendOrigin = frontendOrigins[0] || '';
   need('MONGODB_URI');
 
   const devMailPreview = bool(env.DEV_MAIL_PREVIEW, false);
@@ -28,7 +32,9 @@ function loadConfig(env = process.env) {
   const smtpHost = env.SMTP_HOST || '';
   if (isProd && devMailPreview && !allowDevMailInProd) problems.push('DEV_MAIL_PREVIEW must be false in production (it would leak OTPs and reset links).');
   if (isProd && !smtpHost && !allowDevMailInProd) problems.push('SMTP_HOST is required in production (MFA codes and reset links are sent by email).');
-  if (isProd && frontendOrigin && !frontendOrigin.startsWith('https://')) problems.push('FRONTEND_URL must be https:// in production (secure cookies).');
+  if (isProd && frontendOrigins.some((o) => !o.startsWith('https://') && !o.includes('localhost'))) {
+    problems.push('FRONTEND_URL must be https:// in production (secure cookies).');
+  }
 
   const passwordMin = num(env.PASSWORD_MIN_LENGTH, 6);
   if (passwordMin < 6) problems.push('PASSWORD_MIN_LENGTH cannot be below 6.');
@@ -46,6 +52,7 @@ function loadConfig(env = process.env) {
     timezone: env.APP_TIMEZONE || 'Asia/Kolkata',
     mongoUri: env.MONGODB_URI,
     frontendOrigin,
+    frontendOrigins,
     encKey, pepper,
     session: {
       cookieName: env.COOKIE_NAME || 'pulse_sid',

@@ -32,7 +32,9 @@ function csrf(req, _res, next) {
   if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
   if (req.get('x-pulse-client') !== '1') return next(new AppError(403, 'CSRF', 'Missing client header.'));
   const origin = req.get('origin');
-  if (origin && origin !== getConfig().frontendOrigin) return next(new AppError(403, 'CSRF', 'Origin not allowed.'));
+  const cfg = getConfig();
+  const allowed = cfg.frontendOrigins?.length ? cfg.frontendOrigins : [cfg.frontendOrigin];
+  if (origin && !allowed.includes(origin)) return next(new AppError(403, 'CSRF', 'Origin not allowed.'));
   next();
 }
 module.exports = { requireAuth, enforcePasswordChange, requireRole, csrf };

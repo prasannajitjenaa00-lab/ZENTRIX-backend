@@ -35,10 +35,12 @@ const presenceList = () => [...online.entries()].map(([userId, v]) => ({ userId,
 
 function attach(httpServer) {
   const cfg = getConfig();
+  const allowed = cfg.frontendOrigins?.length ? cfg.frontendOrigins : [cfg.frontendOrigin];
+  const isAllowed = (origin) => !origin || allowed.includes(origin);
   const io = new Server(httpServer, {
     serveClient: false, maxHttpBufferSize: 10_000, pingInterval: 25_000, pingTimeout: 20_000,
-    cors: { origin: cfg.frontendOrigin, credentials: true },
-    allowRequest: (req, cb) => { const o = req.headers.origin; cb(null, !o || o === cfg.frontendOrigin); },   // blocks cross-site WebSocket hijacking
+    cors: { origin: (origin, cb) => cb(null, isAllowed(origin) ? origin : false), credentials: true },
+    allowRequest: (req, cb) => cb(null, isAllowed(req.headers.origin)),   // blocks cross-site WebSocket hijacking
   });
   realtime.setIo(io);
 

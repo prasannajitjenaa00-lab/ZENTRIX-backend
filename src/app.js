@@ -19,7 +19,13 @@ function createApp() {
   app.set('trust proxy', cfg.trustProxy);
 
   app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' }, contentSecurityPolicy: { directives: { defaultSrc: ["'none'"], frameAncestors: ["'none'"] } } }));
-  app.use(cors({ origin: cfg.frontendOrigin, credentials: true, methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], allowedHeaders: ['Content-Type', 'X-Pulse-Client'], maxAge: 600 }));
+  const isAllowedOrigin = (origin) => {
+    if (!origin) return true;
+    if (cfg.frontendOrigins && cfg.frontendOrigins.includes(origin)) return true;
+    if (cfg.frontendOrigin && cfg.frontendOrigin === origin) return true;
+    return false;
+  };
+  app.use(cors({ origin: (origin, cb) => cb(null, isAllowedOrigin(origin) ? origin : false), credentials: true, methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], allowedHeaders: ['Content-Type', 'X-Pulse-Client'], maxAge: 600 }));
   app.use(cookieParser());
 
   app.get('/health', (_req, res) => { const up = dbReady(); res.status(up ? 200 : 503).json({ ok: up, db: up ? 'up' : 'down', uptime: Math.round(process.uptime()) }); });
