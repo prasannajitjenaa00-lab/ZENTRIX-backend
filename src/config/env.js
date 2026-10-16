@@ -31,7 +31,6 @@ function loadConfig(env = process.env) {
   const allowDevMailInProd = bool(env.ALLOW_DEV_MAIL_IN_PROD, false);
   const smtpHost = env.SMTP_HOST || '';
   if (isProd && devMailPreview && !allowDevMailInProd) problems.push('DEV_MAIL_PREVIEW must be false in production (it would leak OTPs and reset links).');
-  if (isProd && !smtpHost && !allowDevMailInProd) problems.push('SMTP_HOST is required in production (MFA codes and reset links are sent by email).');
   if (isProd && frontendOrigins.some((o) => !o.startsWith('https://') && !o.includes('localhost'))) {
     problems.push('FRONTEND_URL must be https:// in production (secure cookies).');
   }

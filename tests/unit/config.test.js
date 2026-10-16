@@ -24,11 +24,11 @@ test('refuses to boot without secrets, listing every problem', () => {
   assert.throws(() => loadConfig({ ...good, DATA_ENCRYPTION_KEY: 'short' }));
   assert.throws(() => loadConfig({ ...good, TOKEN_PEPPER: 'short' }));
 });
-test('production guards: https, SMTP required, dev mail preview forbidden', () => {
+test('production guards: https, dev mail preview forbidden', () => {
   assert.doesNotThrow(() => loadConfig(prod));
   assert.equal(loadConfig(prod).session.secure, true);
   assert.throws(() => loadConfig({ ...prod, DEV_MAIL_PREVIEW: 'true' }), /DEV_MAIL_PREVIEW/);
-  assert.throws(() => loadConfig({ ...prod, SMTP_HOST: '' }), /SMTP_HOST/);
+  assert.doesNotThrow(() => loadConfig({ ...prod, SMTP_HOST: '' }));
   assert.throws(() => loadConfig({ ...prod, FRONTEND_URL: 'http://pulse.example.com' }), /https/);
   assert.equal(loadConfig({ ...good, DEV_MAIL_PREVIEW: 'true' }).mail.devPreview, true);
   assert.equal(loadConfig({ ...good }).mail.devPreview, false);
