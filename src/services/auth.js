@@ -58,10 +58,6 @@ async function login({ email, password }, ctx) {
   // Original silently re-activated suspended accounts on login. Decision Q2: suspended accounts cannot sign in.
   if (user.status !== 'Active') throw new AppError(403, 'ACCOUNT_SUSPENDED', 'This account is suspended. Contact your admin.');
 
-  if (user.mfa?.enabled !== false && !isTrusted(user, ctx.trustedCookie)) {
-    const ch = await startChallenge(user);
-    return { mfaRequired: true, challengeId: ch.challengeId, devPreview: ch.devPreview };
-  }
   return finishLogin(user, ctx);
 }
 
