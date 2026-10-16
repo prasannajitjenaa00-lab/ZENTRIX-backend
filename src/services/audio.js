@@ -71,8 +71,10 @@ async function assign(actor, { trackIds, assigneeIds, deadline }) {
   if (!H.canAssignWork(me)) throw forbidden();
   const bads = assigneeIds.filter((id) => !H.canAssignTrackTo(roster, me, id));
   if (bads.length) throw forbidden('Some employees are outside your scope or inactive.');
-  const missingLeader = assigneeIds.map((id) => roster.find((u) => u.id === id)).filter((e) => !e.leaderId);
-  if (missingLeader.length) throw bad(`${missingLeader[0].name} is not under a team leader. Assign a leader first.`);
+  if (me.role !== 'admin') {
+    const missingLeader = assigneeIds.map((id) => roster.find((u) => u.id === id)).filter((e) => !e.leaderId);
+    if (missingLeader.length) throw bad(`${missingLeader[0].name} is not under a team leader. Assign a leader first.`);
+  }
   const tracks = await AudioTrack.find({ _id: { $in: trackIds } }).select('project').lean();
   if (tracks.length !== trackIds.length) throw notFound('One or more tracks no longer exist.');
   const docs = [];
@@ -176,7 +178,7 @@ async function reassignAssignment(actor, id, assigneeId) {
   if (LOCKED.has(a.status)) throw conflict('This translation has already been submitted and cannot be reassigned.', 'ASSIGNMENT_LOCKED');
   if (!H.canAssignTrackTo(roster, me, assigneeId)) throw forbidden('That employee is outside your scope or inactive.');
   const newEmployee = roster.find((u) => u.id === assigneeId);
-  if (!newEmployee?.leaderId) throw bad(`${newEmployee?.name || 'That employee'} is not under a team leader. Assign a leader first.`);
+  if (me.role !== 'admin' && !newEmployee?.leaderId) throw bad(`${newEmployee?.name || 'That employee'} is not under a team leader. Assign a leader first.`);
   if (await TrackAssignment.exists({ track: a.track, assignee: assigneeId, _id: { $ne: a._id } })) throw conflict('That employee already has this MP3 assigned.', 'DUPLICATE_ASSIGNMENT');
   const prevAssignee = String(a.assignee);
   a.assignee = assigneeId; a.assignedBy = actor._id; a.assignedAt = new Date(); a.status = 'assigned'; a.startedAt = null; a.submittedAt = null; a.reviewedAt = null; a.reviewedBy = null; a.reviewFeedback = '';

@@ -45,6 +45,9 @@ function loadConfig(env = process.env) {
     throw err;
   }
 
+  const isHttpsFrontend = frontendOrigins.some((o) => o.startsWith('https://'));
+  const useCrossSiteCookies = isProd || isRender || isHttpsFrontend || bool(env.COOKIE_SECURE, false);
+
   return Object.freeze({
     nodeEnv, isProd,
     port: num(env.PORT, 8787), host: (env.HOST && env.HOST !== '127.0.0.1') ? env.HOST : '0.0.0.0',
@@ -61,8 +64,8 @@ function loadConfig(env = process.env) {
       absoluteMs: num(env.SESSION_ABSOLUTE_DAYS, 7) * 86400e3,
       trustedDeviceMs: num(env.TRUSTED_DEVICE_DAYS, 30) * 86400e3,
       cookieDomain: env.COOKIE_DOMAIN || undefined,
-      sameSite: env.COOKIE_SAME_SITE || (isProd ? 'none' : 'lax'),
-      secure: isProd,
+      sameSite: env.COOKIE_SAME_SITE || (useCrossSiteCookies ? 'none' : 'lax'),
+      secure: env.COOKIE_SECURE !== undefined ? bool(env.COOKIE_SECURE) : useCrossSiteCookies,
     },
     auth: {
       passwordMin,

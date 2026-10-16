@@ -12,6 +12,7 @@
     "dev": "node --watch src/server.js",
     "test": "node --test \"tests/unit/*.test.js\"",
     "test:integration": "node --test --test-concurrency=1 \"tests/integration/*.test.js\"",
+    "seed": "node scripts/seed-dev.js",
     "seed:reference": "node scripts/seed-reference-data.js",
     "create-user": "node scripts/create-user.js",
     "migrate": "node scripts/migrate-from-json.js"

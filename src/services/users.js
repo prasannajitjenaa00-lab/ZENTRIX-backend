@@ -65,8 +65,8 @@ async function listLeaders() {
 async function resolveLeaderFloor(role, leaderId, floorId) {
   const roster = await loadRoster();
   if (role === 'employee') {
+    if (!leaderId) return { leader: null, floor: null };
     const leader = roster.find((u) => u.id === leaderId);
-    if (!leaderId) throw bad('Every employee must be assigned under a team leader.', { leaderId: 'Required for employees.' });
     if (!leader || leader.role !== 'team_leader' || leader.status !== 'Active') throw bad('Pick a valid team leader.', { leaderId: 'Pick an active team leader.' });
     return { leader: leader.id, floor: leader.floorId || null };
   }
