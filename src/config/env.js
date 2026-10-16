@@ -23,9 +23,10 @@ function loadConfig(env = process.env) {
   need('MONGODB_URI');
 
   const devMailPreview = bool(env.DEV_MAIL_PREVIEW, false);
+  const allowDevMailInProd = bool(env.ALLOW_DEV_MAIL_IN_PROD, false);
   const smtpHost = env.SMTP_HOST || '';
-  if (isProd && devMailPreview) problems.push('DEV_MAIL_PREVIEW must be false in production (it would leak OTPs and reset links).');
-  if (isProd && !smtpHost) problems.push('SMTP_HOST is required in production (MFA codes and reset links are sent by email).');
+  if (isProd && devMailPreview && !allowDevMailInProd) problems.push('DEV_MAIL_PREVIEW must be false in production (it would leak OTPs and reset links).');
+  if (isProd && !smtpHost && !allowDevMailInProd) problems.push('SMTP_HOST is required in production (MFA codes and reset links are sent by email).');
   if (isProd && frontendOrigin && !frontendOrigin.startsWith('https://')) problems.push('FRONTEND_URL must be https:// in production (secure cookies).');
 
   const passwordMin = num(env.PASSWORD_MIN_LENGTH, 6);
@@ -39,7 +40,7 @@ function loadConfig(env = process.env) {
 
   return Object.freeze({
     nodeEnv, isProd,
-    port: num(env.PORT, 8787), host: env.HOST || '127.0.0.1',
+    port: num(env.PORT, 8787), host: env.HOST || (isProd ? '0.0.0.0' : '127.0.0.1'),
     trustProxy: num(env.TRUST_PROXY, 0),
     timezone: env.APP_TIMEZONE || 'Asia/Kolkata',
     mongoUri: env.MONGODB_URI,
@@ -52,6 +53,7 @@ function loadConfig(env = process.env) {
       absoluteMs: num(env.SESSION_ABSOLUTE_DAYS, 7) * 86400e3,
       trustedDeviceMs: num(env.TRUSTED_DEVICE_DAYS, 30) * 86400e3,
       cookieDomain: env.COOKIE_DOMAIN || undefined,
+      sameSite: env.COOKIE_SAME_SITE || (isProd ? 'none' : 'lax'),
       secure: isProd,
     },
     auth: {
@@ -72,7 +74,7 @@ function loadConfig(env = process.env) {
       host: smtpHost, port: num(env.SMTP_PORT, 587), secure: bool(env.SMTP_SECURE, false),
       user: env.SMTP_USER || '', pass: env.SMTP_PASS || '',
       from: env.MAIL_FROM || 'Zentrix Pulse <no-reply@localhost>',
-      devPreview: devMailPreview && !isProd,
+      devPreview: (devMailPreview && !isProd) || (allowDevMailInProd && !smtpHost),
     },
   });
 }

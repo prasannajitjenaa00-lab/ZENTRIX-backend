@@ -12,7 +12,7 @@ const rl = require('../middleware/rateLimit');
 const { requireAuth, enforcePasswordChange } = require('../middleware/auth');
 
 const router = express.Router();
-const sessionCookie = (s) => ({ httpOnly: true, secure: getConfig().session.secure, sameSite: 'lax', path: '/', domain: getConfig().session.cookieDomain, expires: s.expiresAt });
+const sessionCookie = (s) => ({ httpOnly: true, secure: getConfig().session.secure, sameSite: getConfig().session.sameSite, path: '/', domain: getConfig().session.cookieDomain, expires: s.expiresAt });
 const ctxOf = (req) => ({ ip: req.ip, userAgent: req.get('user-agent'), trustedCookie: req.cookies?.[getConfig().session.trustedCookieName] });
 
 function setSession(res, result) {

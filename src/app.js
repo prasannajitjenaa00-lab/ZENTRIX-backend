@@ -18,7 +18,7 @@ function createApp() {
   app.disable('x-powered-by');
   app.set('trust proxy', cfg.trustProxy);
 
-  app.use(helmet({ crossOriginResourcePolicy: { policy: 'same-site' }, contentSecurityPolicy: { directives: { defaultSrc: ["'none'"], frameAncestors: ["'none'"] } } }));
+  app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' }, contentSecurityPolicy: { directives: { defaultSrc: ["'none'"], frameAncestors: ["'none'"] } } }));
   app.use(cors({ origin: cfg.frontendOrigin, credentials: true, methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], allowedHeaders: ['Content-Type', 'X-Pulse-Client'], maxAge: 600 }));
   app.use(cookieParser());
 
