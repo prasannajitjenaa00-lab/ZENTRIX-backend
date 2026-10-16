@@ -1,0 +1,37 @@
+{
+  "name": "zentrix-pulse-server",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Zentrix Pulse backend (Express + MongoDB + Socket.IO)",
+  "main": "src/server.js",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --test \"tests/unit/*.test.js\"",
+    "test:integration": "node --test --test-concurrency=1 \"tests/integration/*.test.js\"",
+    "seed:reference": "node scripts/seed-reference-data.js",
+    "create-user": "node scripts/create-user.js",
+    "migrate": "node scripts/migrate-from-json.js"
+  },
+  "dependencies": {
+    "cookie": "^0.7.2",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.5.0",
+    "helmet": "^8.0.0",
+    "mongoose": "^8.9.0",
+    "multer": "^1.4.5-lts.1",
+    "nodemailer": "^6.9.16",
+    "socket.io": "^4.8.1"
+  },
+  "devDependencies": {
+    "mongodb-memory-server": "^10.1.2",
+    "socket.io-client": "^4.8.1",
+    "supertest": "^7.0.0"
+  }
+}
