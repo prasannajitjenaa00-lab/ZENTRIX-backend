@@ -20,7 +20,7 @@ function createApp() {
 
   app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' }, contentSecurityPolicy: { directives: { defaultSrc: ["'none'"], frameAncestors: ["'none'"] } } }));
   const isAllowedOrigin = (origin) => {
-    if (!origin) return true;
+    if (!origin || cfg.allowAnyOrigin) return true;
     if (cfg.frontendOrigins && cfg.frontendOrigins.includes(origin)) return true;
     if (cfg.frontendOrigin && cfg.frontendOrigin === origin) return true;
     return false;

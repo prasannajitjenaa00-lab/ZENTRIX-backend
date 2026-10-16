@@ -33,6 +33,7 @@ function csrf(req, _res, next) {
   if (req.get('x-pulse-client') !== '1') return next(new AppError(403, 'CSRF', 'Missing client header.'));
   const origin = req.get('origin');
   const cfg = getConfig();
+  if (cfg.allowAnyOrigin) return next();
   const allowed = cfg.frontendOrigins?.length ? cfg.frontendOrigins : [cfg.frontendOrigin];
   if (origin && !allowed.includes(origin)) return next(new AppError(403, 'CSRF', 'Origin not allowed.'));
   next();

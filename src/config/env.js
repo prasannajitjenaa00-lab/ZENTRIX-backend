@@ -56,6 +56,7 @@ function loadConfig(env = process.env) {
     mongoUri: env.MONGODB_URI,
     frontendOrigin,
     frontendOrigins,
+    allowAnyOrigin: bool(env.ALLOW_ANY_ORIGIN, false),
     encKey, pepper,
     session: {
       cookieName: env.COOKIE_NAME || 'pulse_sid',

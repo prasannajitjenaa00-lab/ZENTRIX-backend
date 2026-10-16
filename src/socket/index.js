@@ -36,7 +36,7 @@ const presenceList = () => [...online.entries()].map(([userId, v]) => ({ userId,
 function attach(httpServer) {
   const cfg = getConfig();
   const allowed = cfg.frontendOrigins?.length ? cfg.frontendOrigins : [cfg.frontendOrigin];
-  const isAllowed = (origin) => !origin || allowed.includes(origin);
+  const isAllowed = (origin) => !origin || cfg.allowAnyOrigin || allowed.includes(origin);
   const io = new Server(httpServer, {
     serveClient: false, maxHttpBufferSize: 10_000, pingInterval: 25_000, pingTimeout: 20_000,
     cors: { origin: (origin, cb) => cb(null, isAllowed(origin) ? origin : false), credentials: true },
