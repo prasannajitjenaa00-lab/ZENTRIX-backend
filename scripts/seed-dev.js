@@ -2,17 +2,17 @@
 'use strict';
 /**
  * Developer seed script for Zentrix Pulse.
- * Seeds ONLY:
- *  - 4 default wallet packages
- *  - Dummy Admin (dummy.admin@local.test)
- *  - Dummy Employee (dummy.employee@local.test)
- *
- * Password for both: 7790052789 (MFA disabled, no forced change).
- * Does NOT add tasks, projects, chat, or extra roles.
+ * Safe, idempotent, and non-destructive:
+ *  - Explicitly refuses to run in production environments
+ *  - Adds default wallet packages only if they are genuinely missing without duplicating
+ *  - Creates Dummy Admin (dummy.admin@local.test) only if it does not already exist
+ *  - Creates Dummy Employee (dummy.employee@local.test) only if it does not already exist
+ *  - Preserves all existing records, users, passwords, roles, status, and MFA settings
+ *  - NEVER deletes or clears any tasks, projects, chat messages, activity logs, or user accounts
  */
 const { getConfig } = require('../src/config/env');
 const { connectDb, disconnectDb } = require('../src/config/db');
-const { User, Package, Task, Project, ChatMessage, ActivityLog } = require('../src/models');
+const { User, Package } = require('../src/models');
 const { DEFAULTS } = require('../src/services/packages');
 const C = require('../src/utils/crypto');
 const { todayISO } = require('../src/utils/dates');
@@ -21,67 +21,66 @@ const DEV_PASSWORD = '7790052789';
 
 async function seed() {
   const cfg = getConfig();
-  await connectDb(cfg.mongoUri);
-  console.log('Connected to MongoDB. Starting minimal seed (Admin + Employee only)...');
 
-  // 1. Packages
-  let packages = await Package.find();
-  if (packages.length === 0) {
-    packages = await Package.insertMany(DEFAULTS.map((p) => ({ ...p, currency: '₹' })));
-    console.log(`Created ${packages.length} default packages.`);
+  // Explicit safety check: never run against production
+  if (process.env.NODE_ENV === 'production' || cfg.isProd) {
+    console.error('ERROR: Refusing to run seed-dev.js in a production environment.');
+    process.exit(1);
   }
-  const standardPkg = packages.find((p) => p.key === 'standard') || packages[0];
+
+  await connectDb(cfg.mongoUri);
+  console.log('Connected to MongoDB. Starting safe development seed...');
+
+  // 1. Packages: Add default wallet packages only if genuinely missing
+  let packagesCreated = 0;
+  for (const defPkg of DEFAULTS) {
+    const exists = await Package.findOne({
+      $or: [
+        { key: defPkg.key },
+        { name: defPkg.name },
+      ],
+    });
+    if (!exists) {
+      await Package.create({ ...defPkg, currency: '₹' });
+      packagesCreated++;
+      console.log(`+ Created default package: ${defPkg.name} (${defPkg.key})`);
+    }
+  }
+  if (packagesCreated === 0) {
+    console.log('= Default packages already present — no new packages added.');
+  }
+
+  const standardPkg = (await Package.findOne({ key: 'standard' })) || (await Package.findOne());
 
   const passwordHash = await C.hashPassword(DEV_PASSWORD);
   const today = todayISO(cfg.timezone);
 
-  // Helper to upsert user
-  async function upsertUser(spec) {
-    let u = await User.findOne({ email: spec.email.toLowerCase() });
-    if (!u) {
-      u = await User.create({
-        ...spec,
-        email: spec.email.toLowerCase(),
-        passwordHash,
-        passwordChangedAt: new Date(),
-        passwordChangedBy: 'seed-dev',
-        mustChangePassword: false,
-        status: 'Active',
-        joined: today,
-        mfa: { enabled: false },
-      });
-      console.log(`+ Created ${spec.name} (${spec.email}) [${spec.role}]`);
-    } else {
-      u.passwordHash = passwordHash;
-      u.mustChangePassword = false;
-      u.status = 'Active';
-      if (spec.role) u.role = spec.role;
-      if (spec.package) u.package = spec.package;
-      u.leader = undefined;
-      u.floor = undefined;
-      u.mfa = { enabled: false };
-      await u.save();
-      console.log(`* Updated ${u.name} (${u.email}) [${u.role}]`);
+  // 2. Helper to safely ensure user exists without modifying existing records
+  async function ensureUser(spec) {
+    const email = spec.email.toLowerCase();
+    const existing = await User.findOne({ email });
+    if (existing) {
+      console.log(`= User ${existing.name} (${existing.email}) already exists. Preserved without changes.`);
+      return { user: existing, created: false };
     }
-    return u;
+
+    const created = await User.create({
+      ...spec,
+      email,
+      passwordHash,
+      passwordChangedAt: new Date(),
+      passwordChangedBy: 'seed-dev',
+      mustChangePassword: false,
+      status: 'Active',
+      joined: today,
+      mfa: { enabled: false },
+    });
+    console.log(`+ Created ${created.name} (${created.email}) [${created.role}]`);
+    return { user: created, created: true };
   }
 
-  // 2. Clean up any extra users or sample items added previously
-  const extraEmails = ['floor.manager@local.test', 'dummy.leader@local.test', 'priya.sharma@local.test'];
-  const delUsers = await User.deleteMany({ email: { $in: extraEmails } });
-  if (delUsers.deletedCount > 0) {
-    console.log(`- Removed ${delUsers.deletedCount} extra dev account(s).`);
-  }
-
-  // Remove any sample tasks, projects, chat, activity logs
-  await Task.deleteMany({});
-  await Project.deleteMany({});
-  await ChatMessage.deleteMany({});
-  await ActivityLog.deleteMany({});
-  console.log('- Cleared sample tasks, projects, chat messages, and activity logs.');
-
-  // 3. Upsert ONLY Admin and Employee
-  const admin = await upsertUser({
+  // 3. Ensure Admin and Employee exist (skips if already present)
+  const adminResult = await ensureUser({
     name: 'Dummy Admin',
     email: 'dummy.admin@local.test',
     role: 'admin',
@@ -89,18 +88,18 @@ async function seed() {
     title: 'Workspace Admin',
   });
 
-  const employee = await upsertUser({
+  const employeeResult = await ensureUser({
     name: 'Dummy Employee',
     email: 'dummy.employee@local.test',
     role: 'employee',
     department: 'Operations',
     title: 'Employee',
-    package: standardPkg._id,
+    package: standardPkg?._id,
   });
 
-  console.log('\n--- Seed Complete (Admin and Employee only) ---');
-  console.log(`  Admin:    ${admin.email}    | Password: ${DEV_PASSWORD}`);
-  console.log(`  Employee: ${employee.email} | Password: ${DEV_PASSWORD}`);
+  console.log('\n--- Seed Complete (Safe & Non-Destructive) ---');
+  console.log(`  Admin:    ${adminResult.user.email} | ${adminResult.created ? `Created (Password: ${DEV_PASSWORD})` : 'Preserved (Existing account unchanged)'}`);
+  console.log(`  Employee: ${employeeResult.user.email} | ${employeeResult.created ? `Created (Password: ${DEV_PASSWORD})` : 'Preserved (Existing account unchanged)'}`);
   console.log('-----------------------------------------------\n');
 
   await disconnectDb();
