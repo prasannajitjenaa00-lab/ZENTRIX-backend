@@ -91,7 +91,7 @@ function validate(input, schema) {
 
 const ENUMS = {
   roles: ['admin', 'floor_manager', 'team_leader', 'employee'],
-  statuses: ['Pending', 'In Progress', 'On Hold', 'Completed'],
+  statuses: ['Pending', 'In Progress', 'On Hold', 'Completed', 'Approved'],
   priorities: ['Low', 'Medium', 'High'],
   userStatus: ['Active', 'Suspended'],
 };

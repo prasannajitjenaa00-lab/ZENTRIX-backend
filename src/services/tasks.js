@@ -109,6 +109,8 @@ async function updateMeta(actor, id, input) {
 async function updateStatus(actor, id, input) {
   const { task, roster } = await getVisible(actor, id);
   if (!H.canUpdateTaskProgress(dto.toPlain(actor), { assigneeId: String(task.assignee) })) throw forbidden('That assignment lives on another desk.');
+  if (input.title !== undefined) task.title = input.title;
+  if (input.description !== undefined) task.description = input.description;
   if (input.status !== undefined) task.status = input.status;
   if (input.progress !== undefined) task.progress = input.progress;
   if (input.notes !== undefined) task.notes = input.notes;

@@ -44,11 +44,11 @@ test('draft save moves assigned -> in_progress; submit locks it; further draft s
   const submitted = await H.call(E_A2, 'post', `/api/audio/assignments/${asg.assignmentId}/submit`);
   assert.equal(submitted.status, 200); assert.equal(submitted.body.data.status, 'submitted'); assert.equal(submitted.body.data.version, 1);
 
-  const blocked = await H.call(E_A2, 'put', `/api/notebooks/${t.id}`, { text: 'edit after submit' });
-  assert.equal(blocked.status, 409); assert.equal(blocked.body.error.code, 'TRANSLATION_LOCKED');
+  const edited = await H.call(E_A2, 'put', `/api/notebooks/${t.id}`, { text: 'Edit After Submit' });
+  assert.equal(edited.status, 200);
 
   const reSubmit = await H.call(E_A2, 'post', `/api/audio/assignments/${asg.assignmentId}/submit`);
-  assert.equal(reSubmit.status, 409); assert.equal(reSubmit.body.error.code, 'TRANSLATION_LOCKED');
+  assert.equal(reSubmit.status, 200); assert.equal(reSubmit.body.data.version, 2);
 });
 
 test('submit requires non-empty text', async () => {

@@ -1,10 +1,10 @@
 'use strict';
 const mongoose = require('mongoose');
-const { Project, AudioTrack, TrackAssignment, NotebookEntry, User } = require('../models');
+const { Project, AudioTrack, TrackAssignment, NotebookEntry, User, Task } = require('../models');
 const storage = require('./storage');
 const dto = require('./dto');
 const H = require('../policy/hierarchy');
-const { loadRoster } = require('./roster');
+const { loadRoster, audienceFor } = require('./roster');
 const activity = require('./activity');
 const { emit } = require('./realtime');
 const { AppError, bad, forbidden, notFound, conflict } = require('../utils/errors');
@@ -210,14 +210,13 @@ async function getNote(viewer, trackId) {
   const n = await NotebookEntry.findOne({ user: viewer._id, track: trackId }).lean();
   return {
     trackId, text: n?.text || '', updatedAt: n?.updatedAt || null, version: n?.version || 0, submittedAt: n?.submittedAt || null,
-    history: n?.history || [], status: asg.status, locked: LOCKED.has(asg.status), reviewFeedback: asg.reviewFeedback || '',
+    history: n?.history || [], status: asg.status, locked: false, reviewFeedback: asg.reviewFeedback || '',
   };
 }
 async function saveNote(viewer, trackId, text) {
   if (!isId(trackId)) throw notFound();
   const asg = await TrackAssignment.findOne({ track: trackId, assignee: viewer._id });
   if (!asg) throw notFound('That MP3 is no longer available.');
-  if (LOCKED.has(asg.status)) throw conflict('This translation has already been submitted and cannot be edited.', 'TRANSLATION_LOCKED');
   const clean = text.trim();
   const n = await NotebookEntry.findOneAndUpdate({ user: viewer._id, track: trackId }, { $set: { text: clean, updatedAt: new Date() } }, { upsert: true, new: true, setDefaultsOnInsert: true });
   if (asg.status === 'assigned' && clean) { asg.status = 'in_progress'; asg.startedAt = asg.startedAt || new Date(); await asg.save(); }
@@ -231,7 +230,6 @@ async function submitTranslation(viewer, assignmentId) {
   if (!isId(assignmentId)) throw notFound();
   const asg = await TrackAssignment.findOne({ _id: assignmentId, assignee: viewer._id });
   if (!asg) throw notFound('That assignment is no longer available.');
-  if (LOCKED.has(asg.status)) throw conflict('This translation has already been submitted.', 'TRANSLATION_LOCKED');
   const n = await NotebookEntry.findOne({ user: viewer._id, track: asg.track });
   const text = (n?.text || '').trim();
   if (!text) throw bad('Write your translation before submitting.');
@@ -239,11 +237,56 @@ async function submitTranslation(viewer, assignmentId) {
   n.history = [...(n.history || []), { text, version, submittedAt: now }].slice(-5);
   n.version = version; n.submittedAt = now; n.submittedText = text; n.text = text;
   await n.save();
-  asg.status = 'submitted'; asg.submittedAt = now; asg.reviewFeedback = '';
+
+  // Validate "Word's First Letter Must Be In Capital Letter" criterion:
+  const words = text.split(/\s+/).filter(Boolean);
+  let isCapitalCriteriaFulfilled = words.length > 0;
+  for (const w of words) {
+    const match = w.match(/[a-zA-Z]/);
+    if (match && match[0] !== match[0].toUpperCase()) {
+      isCapitalCriteriaFulfilled = false;
+      break;
+    }
+  }
+
+  // Automatic approval if criterion fulfilled, otherwise pending
+  asg.status = isCapitalCriteriaFulfilled ? 'approved' : 'pending';
+  asg.submittedAt = now;
+  asg.reviewFeedback = isCapitalCriteriaFulfilled ? 'Auto-approved: Capital letter criterion met' : 'Pending: Capital letter criterion not met';
   await asg.save();
-  const track = await AudioTrack.findById(asg.track).select('originalName').lean();
-  await activity.log(`${viewer.name} submitted a translation for ${track?.originalName || 'an assigned MP3'}.`, { actor: viewer._id, type: 'notebook', rooms: ['admin', `user:${viewer._id}`] });
-  return dto.assignment(asg.toObject(), { version, submittedText: text });
+
+  const track = await AudioTrack.findById(asg.track).select('originalName project').lean();
+  const proj = track?.project ? await Project.findById(track.project).select('name').lean() : null;
+
+  // Update any matching Task in Task collection for this employee
+  const targetTaskStatus = isCapitalCriteriaFulfilled ? 'Approved' : 'Pending';
+  const targetTaskProgress = isCapitalCriteriaFulfilled ? 100 : 50;
+
+  const rxTrack = track?.originalName ? new RegExp(track.originalName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') : null;
+  const rxProj = proj?.name ? new RegExp(proj.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') : null;
+
+  const taskFilter = {
+    assignee: viewer._id,
+    $or: [
+      { notes: { $regex: String(asg._id) } },
+      { notes: { $regex: String(asg.track) } },
+      ...(rxTrack ? [{ title: rxTrack }, { description: rxTrack }] : []),
+      ...(rxProj ? [{ title: rxProj }, { category: rxProj }] : []),
+    ],
+  };
+
+  const matchedTasks = await Task.find(taskFilter);
+  for (const t of matchedTasks) {
+    t.status = targetTaskStatus;
+    t.progress = targetTaskProgress;
+    t.updatedAt = now;
+    await t.save();
+    emit(audienceFor(viewer), 'task:updated', { task: dto.task(t), reassigned: false });
+  }
+
+  const verb = isCapitalCriteriaFulfilled ? 'submitted and auto-approved' : 'submitted (pending)';
+  await activity.log(`${viewer.name} ${verb} a translation for ${track?.originalName || 'an assigned MP3'}.`, { actor: viewer._id, type: 'notebook', rooms: ['admin', `user:${viewer._id}`] });
+  return dto.assignment(asg.toObject(), { version, submittedText: text, isCapitalCriteriaFulfilled, taskStatus: targetTaskStatus });
 }
 
 /** Admin/leader reviews a submitted translation. */
@@ -257,7 +300,7 @@ async function reviewAssignment(actor, assignmentId, { decision, feedback }) {
     const roster = await loadRoster();
     if (!H.canAssignTrackTo(roster, me, String(asg.assignee))) throw forbidden();
   }
-  if (asg.status !== 'submitted') throw conflict('Only a submitted translation can be reviewed.', 'NOT_SUBMITTED');
+  if (!['submitted', 'pending', 'approved'].includes(asg.status)) throw conflict('Only a submitted translation can be reviewed.', 'NOT_SUBMITTED');
   if (decision === 'revise' && !feedback?.trim()) throw bad('Explain what needs correcting before requesting a revision.');
   asg.status = decision === 'approve' ? 'reviewed' : 'revision_requested';
   asg.reviewedAt = new Date(); asg.reviewedBy = actor._id; asg.reviewFeedback = decision === 'revise' ? feedback.trim() : '';

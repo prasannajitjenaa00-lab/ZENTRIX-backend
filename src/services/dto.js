@@ -40,7 +40,7 @@ const LOCKED = new Set(['submitted', 'reviewed']);
 function overdueOf(a, now = new Date()) { return !!a.deadline && new Date(a.deadline) < now && !LOCKED.has(a.status); }
 function displayStatusOf(a, now = new Date()) {
   if (overdueOf(a, now)) return 'Overdue';
-  return { assigned: 'Pending', in_progress: 'In Progress', submitted: 'Completed', reviewed: 'Completed', revision_requested: 'Revision requested' }[a.status] || a.status;
+  return { assigned: 'Pending', pending: 'Pending', in_progress: 'In Progress', submitted: 'Completed', reviewed: 'Approved', approved: 'Approved', revision_requested: 'Revision requested' }[a.status] || a.status;
 }
 /** Assignment DTO for the tracking dashboard / review page. `extra` may carry track/employee/note data already loaded by the caller. */
 function assignment(a, extra = {}) {

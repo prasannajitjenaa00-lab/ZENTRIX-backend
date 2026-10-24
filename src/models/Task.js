@@ -9,7 +9,7 @@ const S = new Schema({
   assignedBy: { type: Schema.Types.ObjectId, ref: 'User' },
   start: { type: String, match: /^\d{4}-\d{2}-\d{2}$/ },          // YYYY-MM-DD strings (no timezone drift)
   due: { type: String, required: true, match: /^\d{4}-\d{2}-\d{2}$/, index: true },
-  status: { type: String, enum: ['Pending', 'In Progress', 'On Hold', 'Completed'], default: 'Pending', index: true },
+  status: { type: String, enum: ['Pending', 'In Progress', 'On Hold', 'Completed', 'Approved'], default: 'Pending', index: true },
   priority: { type: String, enum: ['Low', 'Medium', 'High'], default: 'Medium' },
   category: { type: String, default: 'General', maxlength: 60 },
   progress: { type: Number, min: 0, max: 100, default: 0 },

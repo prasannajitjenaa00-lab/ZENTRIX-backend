@@ -24,7 +24,13 @@ router.post('/', leaders, asyncHandler(async (req, res) => {
   ok(res, await svc.create(req.user, { ...b, category: b.category || 'General' }), undefined, 201);
 }));
 router.patch('/:id/status', asyncHandler(async (req, res) => {
-  const b = validate(req.body, { status: r.oneOf(ENUMS.statuses, { optional: true }), progress: r.int({ min: 0, max: 100, clamp: true, optional: true }), notes: r.string({ max: 4000, optional: true, allowEmpty: true }) });
+  const b = validate(req.body, {
+    title: r.string({ min: 1, max: 200, optional: true }),
+    description: r.string({ max: 4000, optional: true, allowEmpty: true }),
+    status: r.oneOf(ENUMS.statuses, { optional: true }),
+    progress: r.int({ min: 0, max: 100, clamp: true, optional: true }),
+    notes: r.string({ max: 4000, optional: true, allowEmpty: true }),
+  });
   ok(res, await svc.updateStatus(req.user, req.params.id, b));
 }));
 router.patch('/:id', admin, asyncHandler(async (req, res) => {

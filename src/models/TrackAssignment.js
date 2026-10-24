@@ -9,7 +9,7 @@ const S = new Schema({
   assignedBy: { type: Schema.Types.ObjectId, ref: 'User' },
   assignedAt: { type: Date, default: Date.now },
   deadline: { type: Date, default: null },
-  status: { type: String, enum: ['assigned', 'in_progress', 'submitted', 'reviewed', 'revision_requested'], default: 'assigned' },
+  status: { type: String, enum: ['assigned', 'in_progress', 'submitted', 'reviewed', 'revision_requested', 'approved', 'pending'], default: 'assigned' },
   startedAt: { type: Date, default: null },
   submittedAt: { type: Date, default: null },
   reviewedAt: { type: Date, default: null },
