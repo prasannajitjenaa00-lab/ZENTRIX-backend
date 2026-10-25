@@ -4,4 +4,5 @@ module.exports = {
   ChatMessage: require('./ChatMessage'), Project: require('./Project'), AudioTrack: require('./AudioTrack'),
   TrackAssignment: require('./TrackAssignment'), NotebookEntry: require('./NotebookEntry'),
   MfaChallenge: require('./MfaChallenge'), PasswordResetToken: require('./PasswordResetToken'), Session: require('./Session'),
+  Withdrawal: require('./Withdrawal'),
 };

@@ -29,7 +29,7 @@ const task = (t) => ({
   start: t.start || null, due: t.due, status: t.status, priority: t.priority, category: t.category, progress: t.progress, notes: t.notes || '',
   createdAt: t.createdAt, updatedAt: t.updatedAt,
 });
-const pkg = (p) => (p ? { id: idOf(p._id), key: p.key || null, name: p.name, amount: p.amount, currency: p.currency || '₹', note: p.note || '' } : null);
+const pkg = (p) => (p ? { id: idOf(p._id), key: p.key || null, name: p.name, amount: p.amount, ratePerHour: p.ratePerHour != null ? p.ratePerHour : p.amount, currency: p.currency || '₹', note: p.note || '' } : null);
 const project = (p) => ({ id: idOf(p._id), name: p.name, description: p.description || '', createdById: idOf(p.createdBy), createdAt: p.createdAt });
 const track = (t) => ({ id: idOf(t._id), projectId: idOf(t.project), originalName: t.originalName, size: t.size, mime: t.mime, duration: t.duration ?? null, uploadedAt: t.createdAt, streamUrl: `/api/audio/${idOf(t._id)}/stream` });
 const chat = (m) => ({ id: idOf(m._id), userId: idOf(m.user), name: m.name, text: m.text, at: m.at });

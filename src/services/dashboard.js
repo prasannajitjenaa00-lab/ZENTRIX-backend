@@ -67,8 +67,17 @@ async function mine(viewer) {
     today, kpis: { assigned: tasks.length, inMotion: counts['In Progress'], cleared: counts.Completed, completionRate: tasks.length ? Math.round((counts.Completed / tasks.length) * 100) : 0 },
     statusCounts: counts, dueSoon, tasks: tasks.sort((a, b) => a.due.localeCompare(b.due)),
     wallet: dto.pkg(u.package) || { id: null, key: 'none', name: 'No package', amount: 0, currency: '₹', note: 'No package assigned' },
-    assignedTracks: tracks.map((t) => ({ ...dto.track(t), projectName: projects.find((p) => String(p._id) === String(t.project))?.name || 'Project',
-      notesWritten: (notes.find((n) => String(n.track) === String(t._id))?.text || '').trim().length > 0 })),
+    assignedTracks: tracks.map((t) => {
+      const note = notes.find((n) => String(n.track) === String(t._id));
+      const listenedSec = note?.listenedSeconds || 0;
+      const maxDur = t.duration || Math.max(60, Math.round((t.size || 0) / 16000));
+      return {
+        ...dto.track(t),
+        projectName: projects.find((p) => String(p._id) === String(t.project))?.name || 'Project',
+        notesWritten: (note?.text || '').trim().length > 0,
+        listenedSeconds: Math.min(listenedSec, maxDur)
+      };
+    }),
   };
 }
 module.exports = { overview, mine };

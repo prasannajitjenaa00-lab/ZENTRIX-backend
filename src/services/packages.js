@@ -13,14 +13,29 @@ const DEFAULTS = [
 ];
 const list = async () => (await Package.find().sort({ amount: 1, name: 1 })).map(dto.pkg);
 async function create(actor, input) {
-  const p = await Package.create({ name: input.name, amount: input.amount ?? 0, currency: input.currency || '₹', note: input.note || '' });
+  const ratePerHour = input.ratePerHour !== undefined ? input.ratePerHour : (input.amount ?? 0);
+  const amount = input.amount !== undefined ? input.amount : ratePerHour;
+  const p = await Package.create({
+    name: input.name,
+    amount,
+    ratePerHour,
+    currency: input.currency || '₹',
+    note: input.note || ''
+  });
   await activity.log(`${actor.name} created package “${p.name}”.`, { actor: actor._id, rooms: ['admin'], type: 'package' });
   return dto.pkg(p);
 }
 async function update(actor, id, input) {
   if (!mongoose.isValidObjectId(id)) throw notFound();
   const p = await Package.findById(id); if (!p) throw notFound('Package not found.');
-  for (const k of ['name', 'amount', 'currency', 'note']) if (input[k] !== undefined) p[k] = input[k];
+  for (const k of ['name', 'amount', 'ratePerHour', 'currency', 'note']) {
+    if (input[k] !== undefined) p[k] = input[k];
+  }
+  if (input.ratePerHour !== undefined && input.amount === undefined) {
+    p.amount = input.ratePerHour;
+  } else if (input.amount !== undefined && input.ratePerHour === undefined) {
+    p.ratePerHour = input.amount;
+  }
   await p.save();
   return dto.pkg(p);
 }

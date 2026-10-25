@@ -20,7 +20,7 @@ router.get('/leaders', admin, asyncHandler(async (req, res) => ok(res, await svc
 router.post('/', admin, asyncHandler(async (req, res) => {
   const b = validate(req.body, {
     name: r.string({ min: 1, max: 120 }), email: r.email(), phone: r.string({ max: 30, optional: true, allowEmpty: true }),
-    role: r.oneOf(['employee', 'team_leader', 'admin']), leaderId: r.objectId({ optional: true, allowEmpty: true }), floorId: r.objectId({ optional: true, allowEmpty: true }),
+    role: r.oneOf(['employee', 'admin']), leaderId: r.objectId({ optional: true, allowEmpty: true }), floorId: r.objectId({ optional: true, allowEmpty: true }),
     packageId: r.objectId({ optional: true, allowEmpty: true }), password: r.string({ max: 200, optional: true, allowEmpty: true, trim: false }),
     mfaEnabled: r.bool({ optional: true }), bankUnlock: r.bool({ optional: true }),
   });

@@ -68,6 +68,7 @@ async function seed() {
       ...spec,
       email,
       passwordHash,
+      visiblePasswordEnc: C.encryptJSON({ password: DEV_PASSWORD }, cfg.encKey),
       passwordChangedAt: new Date(),
       passwordChangedBy: 'seed-dev',
       mustChangePassword: false,

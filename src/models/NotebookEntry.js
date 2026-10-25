@@ -13,6 +13,7 @@ const S = new Schema({
     type: [{ text: String, version: Number, submittedAt: Date }],
     default: [],
   },
+  listenedSeconds: { type: Number, default: 0, min: 0 },
   updatedAt: { type: Date, default: Date.now },
 }, { timestamps: false });
 S.index({ user: 1, track: 1 }, { unique: true });

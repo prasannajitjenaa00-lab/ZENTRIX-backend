@@ -18,6 +18,16 @@ const ROLE_LABEL = { admin: 'Admin', floor_manager: 'Floor Manager', team_leader
 const todayLocal = () => todayISO(getConfig().timezone);
 const encryptBank = (b) => C.encryptJSON(b, getConfig().encKey);
 const decryptBank = (enc) => (enc ? C.decryptJSON(enc, getConfig().encKey) : null);
+const decryptPassword = (enc) => {
+  if (!enc) return null;
+  try {
+    const data = C.decryptJSON(enc, getConfig().encKey);
+    return data?.password || null;
+  } catch {
+    return null;
+  }
+};
+const KNOWN_DEV_PASSWORDS = ['7790052789', 'Passw0rd!', 'Admin@123', 'Emp@123', 'DevPass@123', 'Password@123'];
 
 async function defaultPackageId() {
   const p = (await Package.findOne({ key: 'standard' }).select('_id')) || (await Package.findOne().sort({ createdAt: 1 }).select('_id'));
@@ -33,16 +43,32 @@ async function listAll(query, { includeBank = false } = {}) {
   if (query.status) filter.status = String(query.status);
   if (query.q) { const rx = new RegExp(escapeRegex(String(query.q).slice(0, 60)), 'i'); filter.$or = [{ name: rx }, { email: rx }]; }
   const roleOrder = { admin: 0, floor_manager: 1, team_leader: 2, employee: 3 };
+  const selects = ['+visiblePasswordEnc', '+passwordHash'];
+  if (includeBank) selects.push('+bank.enc');
   const [rows, total] = await Promise.all([
-    User.find(filter).select(includeBank ? '+bank.enc' : '').sort({ name: 1 }).skip(pg.skip).limit(pg.limit),
+    User.find(filter).select(selects.join(' ')).sort({ name: 1 }).skip(pg.skip).limit(pg.limit),
     User.countDocuments(filter),
   ]);
   rows.sort((a, b) => roleOrder[a.role] - roleOrder[b.role] || a.name.localeCompare(b.name));  // original Accounts ordering
-  const data = rows.map((u) => {
+  const data = await Promise.all(rows.map(async (u) => {
     const out = dto.userFull(u);
     if (includeBank && u.bank?.enc) { try { out.bankDetails = { ...decryptBank(u.bank.enc) }; } catch { out.bankDetails = null; } }
+    let pass = decryptPassword(u.visiblePasswordEnc);
+    if (!pass && u.passwordHash) {
+      for (const cand of KNOWN_DEV_PASSWORDS) {
+        try {
+          if (await C.verifyPassword(cand, u.passwordHash)) {
+            pass = cand;
+            const enc = C.encryptJSON({ password: cand }, getConfig().encKey);
+            User.updateOne({ _id: u._id }, { $set: { visiblePasswordEnc: enc } }).catch(() => {});
+            break;
+          }
+        } catch {}
+      }
+    }
+    out.currentPassword = pass || null;
     return out;
-  });
+  }));
   return { data, meta: pageMeta(pg, total) };
 }
 async function listCrew(viewer) {
@@ -95,6 +121,7 @@ async function create(actor, input) {
   }
   const user = await User.create({
     name: input.name, email: input.email, passwordHash: await C.hashPassword(password),
+    visiblePasswordEnc: C.encryptJSON({ password }, getConfig().encKey),
     passwordChangedAt: new Date(), passwordChangedBy: actor.name, mustChangePassword: true,   // admin-issued passwords are temporary
     role: input.role, department: ROLE_LABEL[input.role], title: ROLE_LABEL[input.role], phone: input.phone || '',
     status: 'Active', joined: todayLocal(), leader: leader || undefined, floor: floor || undefined,
@@ -104,8 +131,10 @@ async function create(actor, input) {
   let recoveryCodes;
   if (user.mfa.enabled) recoveryCodes = await auth.regenerateRecoveryCodes(user._id);
   await activity.log(`${actor.name} created ${ROLE_LABEL[input.role].toLowerCase()} account for ${user.name}.`, { actor: actor._id, involved: [user._id], rooms: ['admin'] });
-  emit(['admin'], 'user:created', { user: dto.userFull(user) });
-  return { user: dto.userFull(user), temporaryPassword: tempProvided ? undefined : password, recoveryCodes };
+  const outUser = dto.userFull(user);
+  outUser.currentPassword = password;
+  emit(['admin'], 'user:created', { user: outUser });
+  return { user: outUser, temporaryPassword: tempProvided ? undefined : password, recoveryCodes };
 }
 
 async function update(actor, id, input) {
@@ -140,9 +169,11 @@ async function update(actor, id, input) {
     await activity.log(`${actor.name} replaced the password for ${user.name}. Previous password deleted.`, { actor: actor._id, involved: [user._id], rooms: ['admin'] });
   }
   await activity.log(`${actor.name} updated ${user.name}'s account.`, { actor: actor._id, involved: [user._id], rooms: ['admin', `user:${user._id}`] });
-  const fresh = await User.findById(user._id);
-  emit(['admin', `user:${user._id}`], 'user:updated', { user: dto.userFull(fresh) });
-  return { user: dto.userFull(fresh), recoveryCodes: Array.isArray(recoveryCodes) ? recoveryCodes : undefined };
+  const fresh = await User.findById(user._id).select('+visiblePasswordEnc');
+  const freshDto = dto.userFull(fresh);
+  freshDto.currentPassword = decryptPassword(fresh.visiblePasswordEnc);
+  emit(['admin', `user:${user._id}`], 'user:updated', { user: freshDto });
+  return { user: freshDto, recoveryCodes: Array.isArray(recoveryCodes) ? recoveryCodes : undefined };
 }
 
 async function setStatus(actor, id, status) {

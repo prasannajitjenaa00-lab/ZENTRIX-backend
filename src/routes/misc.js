@@ -20,7 +20,7 @@ const admin = requireRole('admin');
 const leaders = requireRole('admin', 'floor_manager', 'team_leader');
 
 const pkg = express.Router();
-const pkgBody = { name: r.string({ min: 1, max: 80 }), amount: r.number({ min: 0, max: 1e9, optional: true }), currency: r.string({ max: 4, optional: true, allowEmpty: true }), note: r.string({ max: 300, optional: true, allowEmpty: true }) };
+const pkgBody = { name: r.string({ min: 1, max: 80 }), amount: r.number({ min: 0, max: 1e9, optional: true }), ratePerHour: r.number({ min: 0, max: 1e9, optional: true }), currency: r.string({ max: 4, optional: true, allowEmpty: true }), note: r.string({ max: 300, optional: true, allowEmpty: true }) };
 pkg.get('/', admin, asyncHandler(async (req, res) => ok(res, await packages.list())));
 pkg.post('/', admin, asyncHandler(async (req, res) => ok(res, await packages.create(req.user, validate(req.body, pkgBody)), undefined, 201)));
 pkg.patch('/:id', admin, asyncHandler(async (req, res) => ok(res, await packages.update(req.user, req.params.id, validate(req.body, { ...pkgBody, name: r.string({ min: 1, max: 80, optional: true }) })))));

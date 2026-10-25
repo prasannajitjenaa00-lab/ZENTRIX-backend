@@ -28,6 +28,7 @@ const rules = {
     if (!values.includes(v)) throw new Error(`Must be one of: ${values.join(', ')}.`);
     return v;
   }, optional),
+  enum: (values, opts) => rules.oneOf(values, opts),
   int: ({ min = -Infinity, max = Infinity, optional = false, clamp = false } = {}) => wrap((v) => {
     if (v === undefined || v === null || v === '') { if (optional) return undefined; throw new Error('Required.'); }
     let n = Number(v);

@@ -39,16 +39,19 @@ async function ingestUploads(actor, projectId, files) {
   const project = isId(projectId) ? await Project.findById(projectId) : null;
   if (!project) { await Promise.all(files.map((f) => storage.discard(f.path))); throw notFound('Choose a project section first.'); }
   const tracks = []; const rejected = [];
+  let trackCounter = await AudioTrack.countDocuments();
   for (const f of files) {
     try {
       // Extension and browser MIME are NOT trusted: inspect the bytes.
       const head = await storage.readHead(f.path, 131072);
-      if (!looksLikeMp3(head)) { rejected.push({ name: safeMp3Name(f.originalname), reason: 'Not a valid MP3 file.' }); await storage.discard(f.path); continue; }
+      if (!looksLikeMp3(head)) { rejected.push({ name: f.originalname, reason: 'Not a valid MP3 file.' }); await storage.discard(f.path); continue; }
       const duration = estimateDuration(head, f.size);   // best-effort; a miss never fails the upload
       const { key, sha256 } = await storage.put(f.path);
-      const t = await AudioTrack.create({ project: project._id, originalName: safeMp3Name(f.originalname), storageKey: key, size: f.size, mime: 'audio/mpeg', duration, sha256, uploadedBy: actor._id });
+      trackCounter += 1;
+      const cleanName = `${trackCounter} MP3`;
+      const t = await AudioTrack.create({ project: project._id, originalName: cleanName, storageKey: key, size: f.size, mime: 'audio/mpeg', duration, sha256, uploadedBy: actor._id });
       tracks.push(t);
-    } catch (e) { rejected.push({ name: safeMp3Name(f.originalname), reason: 'Could not store this file.' }); await storage.discard(f.path); }
+    } catch (e) { rejected.push({ name: f.originalname, reason: 'Could not store this file.' }); await storage.discard(f.path); }
   }
   if (!tracks.length) throw new AppError(400, 'NO_VALID_FILES', 'Only MP3 files can be uploaded to a project.', { rejected });
   await activity.log(tracks.length === 1 ? `${actor.name} uploaded “${tracks[0].originalName}” to “${project.name}”.` : `${actor.name} uploaded ${tracks.length} MP3 files to “${project.name}”.`, { actor: actor._id, type: 'audio', rooms: ['admin'] });
@@ -209,20 +212,37 @@ async function getNote(viewer, trackId) {
   if (!asg) throw notFound('That MP3 is no longer available.');
   const n = await NotebookEntry.findOne({ user: viewer._id, track: trackId }).lean();
   return {
-    trackId, text: n?.text || '', updatedAt: n?.updatedAt || null, version: n?.version || 0, submittedAt: n?.submittedAt || null,
+    trackId, text: n?.text || '', listenedSeconds: n?.listenedSeconds || 0, updatedAt: n?.updatedAt || null, version: n?.version || 0, submittedAt: n?.submittedAt || null,
     history: n?.history || [], status: asg.status, locked: false, reviewFeedback: asg.reviewFeedback || '',
   };
 }
-async function saveNote(viewer, trackId, text) {
+async function saveNote(viewer, trackId, text, listenedSeconds) {
   if (!isId(trackId)) throw notFound();
   const asg = await TrackAssignment.findOne({ track: trackId, assignee: viewer._id });
   if (!asg) throw notFound('That MP3 is no longer available.');
-  const clean = text.trim();
-  const n = await NotebookEntry.findOneAndUpdate({ user: viewer._id, track: trackId }, { $set: { text: clean, updatedAt: new Date() } }, { upsert: true, new: true, setDefaultsOnInsert: true });
-  if (asg.status === 'assigned' && clean) { asg.status = 'in_progress'; asg.startedAt = asg.startedAt || new Date(); await asg.save(); }
-  const track = await AudioTrack.findById(trackId).select('originalName').lean();
-  await activity.log(`${viewer.name} updated the translation draft for ${track?.originalName || 'an assigned MP3'}.`, { actor: viewer._id, type: 'notebook', rooms: ['admin', `user:${viewer._id}`] });
-  return { trackId, text: n.text, updatedAt: n.updatedAt, status: asg.status };
+  const track = await AudioTrack.findById(trackId).select('originalName duration size').lean();
+
+  const updateSet = { updatedAt: new Date() };
+  if (text !== undefined) updateSet.text = String(text).trim();
+  if (listenedSeconds !== undefined && listenedSeconds !== null) {
+    const maxDur = track?.duration || Math.max(60, Math.round((track?.size || 0) / 16000));
+    updateSet.listenedSeconds = Math.min(Math.max(0, Math.round(Number(listenedSeconds) || 0)), maxDur);
+  }
+
+  const n = await NotebookEntry.findOneAndUpdate(
+    { user: viewer._id, track: trackId },
+    { $set: updateSet },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
+  if (asg.status === 'assigned' && (updateSet.text || (updateSet.listenedSeconds && updateSet.listenedSeconds > 0))) {
+    asg.status = 'in_progress';
+    asg.startedAt = asg.startedAt || new Date();
+    await asg.save();
+  }
+  if (text !== undefined && String(text).trim()) {
+    await activity.log(`${viewer.name} updated the translation draft for ${track?.originalName || 'an assigned MP3'}.`, { actor: viewer._id, type: 'notebook', rooms: ['admin', `user:${viewer._id}`] });
+  }
+  return { trackId, text: n.text, listenedSeconds: n.listenedSeconds || 0, updatedAt: n.updatedAt, status: asg.status };
 }
 
 /** Employee submits the current draft as the translation. */
@@ -311,7 +331,54 @@ async function reviewAssignment(actor, assignmentId, { decision, feedback }) {
   return dto.assignment(asg.toObject());
 }
 
+async function listAllTracks() {
+  const tracks = await AudioTrack.find().populate('project', 'name').sort({ createdAt: -1 }).lean();
+  const trackIds = tracks.map((t) => t._id);
+  const assignments = await TrackAssignment.find({ track: { $in: trackIds } })
+    .populate('assignee', 'name email')
+    .lean();
+  const assignMap = new Map();
+  assignments.forEach((a) => {
+    const tid = String(a.track);
+    if (!assignMap.has(tid)) assignMap.set(tid, []);
+    assignMap.get(tid).push({
+      id: String(a._id),
+      status: a.status,
+      assignedAt: a.assignedAt,
+      deadline: a.deadline,
+      assigneeName: a.assignee?.name || 'Unknown',
+      assigneeEmail: a.assignee?.email || '',
+    });
+  });
+  return tracks.map((t) => {
+    const asgs = assignMap.get(String(t._id)) || [];
+    return {
+      ...dto.track(t),
+      projectName: t.project?.name || 'General',
+      assignments: asgs,
+      assignedCount: asgs.length,
+      isAssigned: asgs.length > 0,
+      createdAt: t.createdAt,
+    };
+  });
+}
+
+async function deleteTrack(actor, trackId) {
+  if (!isId(trackId)) throw notFound('Track not found.');
+  const track = await AudioTrack.findById(trackId);
+  if (!track) throw notFound('Track not found.');
+  try { await storage.discard(track.storageKey); } catch {}
+  const assignments = await TrackAssignment.find({ track: track._id });
+  const assignmentIds = assignments.map((a) => a._id);
+  await NotebookEntry.deleteMany({ assignment: { $in: assignmentIds } });
+  await TrackAssignment.deleteMany({ track: track._id });
+  await AudioTrack.deleteOne({ _id: track._id });
+  await activity.log(`${actor.name} deleted audio track “${track.originalName}”.`, { actor: actor._id, type: 'audio', rooms: ['admin'] });
+  return { deleted: true, id: String(track._id) };
+}
+
 module.exports = {
-  createProject, listProjects, listTracks, ingestUploads, authorizeTrack, assign, assignedFor, getNote, saveNote,
+  createProject, listProjects, listTracks, listAllTracks, deleteTrack, ingestUploads, authorizeTrack, assign, assignedFor, getNote, saveNote,
   listAssignments, getAssignment, reassignAssignment, removeAssignment, submitTranslation, reviewAssignment,
 };
+

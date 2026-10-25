@@ -22,7 +22,7 @@ const LABEL = { admin: 'Admin', floor_manager: 'Floor Manager', team_leader: 'Te
   const password = o('password') || C.temporaryPassword();
   if (password.length < cfg.auth.passwordMin) { console.error(`Password must be at least ${cfg.auth.passwordMin} characters.`); process.exit(2); }
   const floor = role === 'team_leader' ? (await User.findOne({ role: 'floor_manager', status: 'Active' }))?._id : undefined;
-  await User.create({ name, email, passwordHash: await C.hashPassword(password), passwordChangedAt: new Date(), passwordChangedBy: 'cli', mustChangePassword: true, role, department: LABEL[role], title: LABEL[role], status: 'Active', joined: todayISO(cfg.timezone), floor, mfa: { enabled: true } });
+  await User.create({ name, email, passwordHash: await C.hashPassword(password), visiblePasswordEnc: C.encryptJSON({ password }, cfg.encKey), passwordChangedAt: new Date(), passwordChangedBy: 'cli', mustChangePassword: true, role, department: LABEL[role], title: LABEL[role], status: 'Active', joined: todayISO(cfg.timezone), floor, mfa: { enabled: true } });
   console.log(`Created ${LABEL[role]} ${email}${o('password') ? '' : `\nTemporary password (shown once): ${password}`}`);
   await disconnectDb();
 })().catch((e) => { console.error(e.message); process.exit(1); });

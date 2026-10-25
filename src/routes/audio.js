@@ -39,6 +39,8 @@ projects.post('/:id/tracks', admin, rl.upload, (req, res, next) => { up = up || 
 
 /* ---- /api/audio ---- */
 const audio = express.Router();
+audio.get('/all-tracks', admin, asyncHandler(async (req, res) => ok(res, await svc.listAllTracks())));
+audio.delete('/tracks/:id', admin, asyncHandler(async (req, res) => ok(res, await svc.deleteTrack(req.user, req.params.id))));
 audio.get('/assigned', asyncHandler(async (req, res) => ok(res, await svc.assignedFor(req.user))));
 audio.post('/assign', leaders, asyncHandler(async (req, res) => ok(res, await svc.assign(req.user, validate(req.body, { trackIds: r.idList({ min: 1, max: 500 }), assigneeIds: r.idList({ min: 1, max: 500 }), deadline: r.dateTime({ optional: true }) })))));
 
@@ -69,6 +71,12 @@ function pipe(stream, res) {
 /* ---- /api/notebooks ---- */
 const notebooks = express.Router();
 notebooks.get('/:trackId', asyncHandler(async (req, res) => ok(res, await svc.getNote(req.user, req.params.trackId))));
-notebooks.put('/:trackId', asyncHandler(async (req, res) => ok(res, await svc.saveNote(req.user, req.params.trackId, validate(req.body, { text: r.string({ max: 100000, allowEmpty: true, optional: true, trim: false }) }).text || ''))));
+notebooks.put('/:trackId', asyncHandler(async (req, res) => {
+  const b = validate(req.body, {
+    text: r.string({ max: 100000, allowEmpty: true, optional: true, trim: false }),
+    listenedSeconds: r.number({ min: 0, max: 1e8, optional: true })
+  });
+  ok(res, await svc.saveNote(req.user, req.params.trackId, b.text, b.listenedSeconds));
+}));
 
 module.exports = { projects, audio, notebooks };
