@@ -29,6 +29,26 @@ const decryptPassword = (enc) => {
 };
 const KNOWN_DEV_PASSWORDS = ['7790052789', 'Passw0rd!', 'Admin@123', 'Emp@123', 'DevPass@123', 'Password@123'];
 
+/** Non-blocking background backfill for legacy accounts without visiblePasswordEnc */
+async function backfillLegacyPasswords() {
+  try {
+    const users = await User.find({ visiblePasswordEnc: { $exists: false } }).select('+passwordHash');
+    for (const u of users) {
+      if (!u.passwordHash) continue;
+      for (const cand of KNOWN_DEV_PASSWORDS) {
+        try {
+          if (await C.verifyPassword(cand, u.passwordHash)) {
+            const enc = C.encryptJSON({ password: cand }, getConfig().encKey);
+            await User.updateOne({ _id: u._id }, { $set: { visiblePasswordEnc: enc } });
+            break;
+          }
+        } catch {}
+      }
+    }
+  } catch {}
+}
+setTimeout(() => { backfillLegacyPasswords().catch(() => {}); }, 2000).unref();
+
 async function defaultPackageId() {
   const p = (await Package.findOne({ key: 'standard' }).select('_id')) || (await Package.findOne().sort({ createdAt: 1 }).select('_id'));
   return p?._id || null;
@@ -43,32 +63,19 @@ async function listAll(query, { includeBank = false } = {}) {
   if (query.status) filter.status = String(query.status);
   if (query.q) { const rx = new RegExp(escapeRegex(String(query.q).slice(0, 60)), 'i'); filter.$or = [{ name: rx }, { email: rx }]; }
   const roleOrder = { admin: 0, floor_manager: 1, team_leader: 2, employee: 3 };
-  const selects = ['+visiblePasswordEnc', '+passwordHash'];
+  const selects = ['+visiblePasswordEnc'];
   if (includeBank) selects.push('+bank.enc');
   const [rows, total] = await Promise.all([
     User.find(filter).select(selects.join(' ')).sort({ name: 1 }).skip(pg.skip).limit(pg.limit),
     User.countDocuments(filter),
   ]);
   rows.sort((a, b) => roleOrder[a.role] - roleOrder[b.role] || a.name.localeCompare(b.name));  // original Accounts ordering
-  const data = await Promise.all(rows.map(async (u) => {
+  const data = rows.map((u) => {
     const out = dto.userFull(u);
     if (includeBank && u.bank?.enc) { try { out.bankDetails = { ...decryptBank(u.bank.enc) }; } catch { out.bankDetails = null; } }
-    let pass = decryptPassword(u.visiblePasswordEnc);
-    if (!pass && u.passwordHash) {
-      for (const cand of KNOWN_DEV_PASSWORDS) {
-        try {
-          if (await C.verifyPassword(cand, u.passwordHash)) {
-            pass = cand;
-            const enc = C.encryptJSON({ password: cand }, getConfig().encKey);
-            User.updateOne({ _id: u._id }, { $set: { visiblePasswordEnc: enc } }).catch(() => {});
-            break;
-          }
-        } catch {}
-      }
-    }
-    out.currentPassword = pass || null;
+    out.currentPassword = decryptPassword(u.visiblePasswordEnc) || null;
     return out;
-  }));
+  });
   return { data, meta: pageMeta(pg, total) };
 }
 async function listCrew(viewer) {
