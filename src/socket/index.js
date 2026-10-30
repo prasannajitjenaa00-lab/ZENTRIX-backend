@@ -18,6 +18,7 @@
  *   task:deleted     {taskId}
  *   activity:new     {activity}
  *   chat:message     {message}
+ *   help:message     {message}                      to admin + the sender
  *   track:assigned   {count}                        to the assignee
  *   user:created / user:updated {user}              admin (and the user for updated)
  * Client -> server: presence:request (ack with list). Anything else is ignored.
@@ -48,7 +49,7 @@ function attach(httpServer) {
     try {
       const raw = cookie.parse(socket.handshake.headers.cookie || '')[cfg.session.cookieName];
       const found = await sessions.resolve(raw);
-      if (!found || found.user.mustChangePassword) return next(new Error('unauthorized'));
+      if (!found) return next(new Error('unauthorized'));
       const u = found.user;
       socket.data = { token: raw, user: { id: String(u._id), name: u.name, role: u.role } };
       next();

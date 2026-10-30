@@ -34,15 +34,22 @@ projects.post('/:id/tracks', admin, rl.upload, (req, res, next) => { up = up || 
   const files = [...(req.files?.files || []), ...(req.files?.file || [])];
   if (!files.length) throw new AppError(400, 'NO_FILES', 'No MP3 files were attached.');
   if (files.length > getConfig().storage.maxBatch) { await Promise.all(files.map((f) => storage.discard(f.path))); throw new AppError(400, 'BATCH_TOO_LARGE', `Upload at most ${getConfig().storage.maxBatch} MP3 files at a time.`); }
-  ok(res, await svc.ingestUploads(req.user, req.params.id, files), undefined, 201);
+  let clientDurations = {};
+  try { if (req.body?.durations) clientDurations = typeof req.body.durations === 'string' ? JSON.parse(req.body.durations) : req.body.durations; } catch {}
+  ok(res, await svc.ingestUploads(req.user, req.params.id, files, clientDurations), undefined, 201);
 }));
 
 /* ---- /api/audio ---- */
 const audio = express.Router();
+audio.get('/all-tracks', leaders, asyncHandler(async (req, res) => ok(res, await svc.listAllTracks(req.user))));
+audio.delete('/tracks/:id', leaders, asyncHandler(async (req, res) => ok(res, await svc.deleteTrack(req.user, req.params.id))));
+audio.patch('/tracks/:id/duration', leaders, asyncHandler(async (req, res) => ok(res, await svc.updateTrackDuration(req.user, req.params.id, validate(req.body, { duration: r.number({ min: 1, max: 86400 }) }).duration))));
 audio.get('/assigned', asyncHandler(async (req, res) => ok(res, await svc.assignedFor(req.user))));
+audio.get('/work-history', asyncHandler(async (req, res) => ok(res, await svc.myWorkHistory(req.user))));
 audio.post('/assign', leaders, asyncHandler(async (req, res) => ok(res, await svc.assign(req.user, validate(req.body, { trackIds: r.idList({ min: 1, max: 500 }), assigneeIds: r.idList({ min: 1, max: 500 }), deadline: r.dateTime({ optional: true }) })))));
 
 /* ---- /api/audio/assignments: tracking dashboard + review ---- */
+audio.get('/assignments/summary', leaders, asyncHandler(async (req, res) => ok(res, await svc.assignmentsSummary(req.user))));
 audio.get('/assignments', leaders, asyncHandler(async (req, res) => { const out = await svc.listAssignments(req.user, req.query); ok(res, out.data, out.meta); }));
 audio.get('/assignments/:id', asyncHandler(async (req, res) => ok(res, await svc.getAssignment(req.user, req.params.id))));
 audio.patch('/assignments/:id/reassign', leaders, asyncHandler(async (req, res) => ok(res, await svc.reassignAssignment(req.user, req.params.id, validate(req.body, { assigneeId: r.objectId() }).assigneeId))));

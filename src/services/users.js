@@ -18,6 +18,8 @@ const ROLE_LABEL = { admin: 'Admin', floor_manager: 'Floor Manager', team_leader
 const todayLocal = () => todayISO(getConfig().timezone);
 const encryptBank = (b) => C.encryptJSON(b, getConfig().encKey);
 const decryptBank = (enc) => (enc ? C.decryptJSON(enc, getConfig().encKey) : null);
+const encryptPassword = (p) => C.encryptJSON(p, getConfig().encKey);
+const decryptPassword = (enc) => (enc ? C.decryptJSON(enc, getConfig().encKey) : null);
 
 async function defaultPackageId() {
   const p = (await Package.findOne({ key: 'standard' }).select('_id')) || (await Package.findOne().sort({ createdAt: 1 }).select('_id'));
@@ -31,7 +33,7 @@ async function listAll(query, { includeBank = false } = {}) {
   const filter = {};
   if (query.role) filter.role = String(query.role);
   if (query.status) filter.status = String(query.status);
-  if (query.q) { const rx = new RegExp(escapeRegex(String(query.q).slice(0, 60)), 'i'); filter.$or = [{ name: rx }, { email: rx }]; }
+  if (query.q) { const rx = new RegExp(escapeRegex(String(query.q).slice(0, 60)), 'i'); filter.$or = [{ name: rx }, { email: rx }, { legacyId: rx }]; }
   const roleOrder = { admin: 0, floor_manager: 1, team_leader: 2, employee: 3 };
   const [rows, total] = await Promise.all([
     User.find(filter).select(includeBank ? '+bank.enc' : '').sort({ name: 1 }).skip(pg.skip).limit(pg.limit),
@@ -87,7 +89,7 @@ async function create(actor, input) {
   const password = input.password || C.temporaryPassword();
   auth.checkPasswordPolicy(password);
   const bankIn = input.bank || {};
-  const hasBank = !!(bankIn.holder || bankIn.name || bankIn.account || bankIn.ifsc);
+  const hasBank = !!(bankIn.holder || bankIn.name || bankIn.account || bankIn.ifsc || bankIn.upi || bankIn.aadharPan);
   let bankDoc = { hasDetails: false, locked: false };
   if (hasBank) {
     const b = validateBank(bankIn);
@@ -95,7 +97,8 @@ async function create(actor, input) {
   }
   const user = await User.create({
     name: input.name, email: input.email, passwordHash: await C.hashPassword(password),
-    passwordChangedAt: new Date(), passwordChangedBy: actor.name, mustChangePassword: true,   // admin-issued passwords are temporary
+    passwordPlain: { enc: encryptPassword(password), updatedAt: new Date() },
+    passwordChangedAt: new Date(), passwordChangedBy: actor.name, mustChangePassword: false,   // password change on login disabled
     role: input.role, department: ROLE_LABEL[input.role], title: ROLE_LABEL[input.role], phone: input.phone || '',
     status: 'Active', joined: todayLocal(), leader: leader || undefined, floor: floor || undefined,
     package: input.role === 'employee' ? (input.packageId || (await defaultPackageId()) || undefined) : undefined,
@@ -193,7 +196,7 @@ async function saveOwnBank(viewer, input) {
 async function adminSetBank(actor, id, input) {
   const u = await User.findById(id);
   if (!u) throw notFound('Account not found.');
-  const any = ['holder', 'name', 'account', 'ifsc'].some((k) => input[k]);
+  const any = ['holder', 'name', 'account', 'ifsc', 'upi', 'aadharPan'].some((k) => input[k] !== undefined && input[k] !== '');
   if (any) {
     const b = validateBank(input);
     u.bank = { enc: encryptBank(b), hasDetails: true, locked: !input.unlock, updatedAt: new Date() };
@@ -202,10 +205,24 @@ async function adminSetBank(actor, id, input) {
   } else if (input.unlock === false && u.bank?.hasDetails) {
     u.bank.locked = true;
   }
+  if (input.legacyId !== undefined) {
+    u.legacyId = input.legacyId ? String(input.legacyId).trim() : undefined;
+  }
+  if (input.userName !== undefined && input.userName.trim()) {
+    u.name = String(input.userName).trim();
+  }
   await u.save();
-  await activity.log(`${actor.name} ${input.unlock ? 'unlocked' : 'updated'} bank details for ${u.name}.`, { actor: actor._id, involved: [u._id], type: 'bank', rooms: ['admin'] });
+  await activity.log(`${actor.name} ${input.unlock ? 'unlocked' : 'updated'} KYC details for ${u.name}.`, { actor: actor._id, involved: [u._id], type: 'bank', rooms: ['admin'] });
   emit([`user:${u._id}`, 'admin'], 'user:updated', { user: dto.userFull(u) });
-  return { locked: !!u.bank.locked, hasDetails: !!u.bank.hasDetails };
+  return { locked: !!u.bank.locked, hasDetails: !!u.bank.hasDetails, bankDetails: decryptBank(u.bank?.enc), legacyId: u.legacyId, name: u.name };
+}
+
+/** Admin-only: current plaintext password, decrypted on demand. Every reveal is audit-logged. */
+async function getPassword(actor, targetId) {
+  const u = await User.findById(targetId).select('+passwordPlain.enc');
+  if (!u) throw notFound('Account not found.');
+  await activity.log(`${actor.name} viewed the password for ${u.name}.`, { actor: actor._id, involved: [u._id], type: 'password', rooms: ['admin'] });
+  return { password: decryptPassword(u.passwordPlain?.enc), updatedAt: u.passwordPlain?.updatedAt || null };
 }
 
 /* ---------- wallet / package ---------- */
@@ -215,4 +232,13 @@ async function walletFor(user) {
   return { package: dto.pkg(u.package) || fallback };
 }
 
-module.exports = { listAll, listCrew, listAssignable, listLeaders, create, update, setStatus, updateSelf, getBank, saveOwnBank, adminSetBank, walletFor, ROLE_LABEL };
+async function remove(actor, id) {
+  if (String(actor._id) === String(id)) throw bad('You cannot delete your own admin account.');
+  const u = await User.findById(id);
+  if (!u) throw notFound('Account not found.');
+  await User.deleteOne({ _id: u._id });
+  await activity.log(`${actor.name} deleted account for ${u.name}.`, { actor: actor._id, type: 'user', rooms: ['admin'] });
+  return { deleted: true };
+}
+
+module.exports = { listAll, listCrew, listAssignable, listLeaders, create, update, setStatus, remove, updateSelf, getBank, saveOwnBank, adminSetBank, getPassword, walletFor, ROLE_LABEL };

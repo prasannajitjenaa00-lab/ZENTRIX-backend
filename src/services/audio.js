@@ -10,6 +10,7 @@ const { emit } = require('./realtime');
 const { AppError, bad, forbidden, notFound, conflict } = require('../utils/errors');
 const { looksLikeMp3, safeMp3Name, estimateDuration } = require('../utils/mp3');
 const { parsePage, pageMeta } = require('../utils/pagination');
+const { validateTranscriptRules } = require('../utils/transcriptRules');
 
 const isId = (s) => mongoose.isValidObjectId(s);
 const oid = (s) => new mongoose.Types.ObjectId(String(s));
@@ -35,7 +36,7 @@ async function listTracks(projectId) {
 }
 
 /* ---------- upload (files already on disk in tmp via multer) ---------- */
-async function ingestUploads(actor, projectId, files) {
+async function ingestUploads(actor, projectId, files, clientDurations = {}) {
   const project = isId(projectId) ? await Project.findById(projectId) : null;
   if (!project) { await Promise.all(files.map((f) => storage.discard(f.path))); throw notFound('Choose a project section first.'); }
   const tracks = []; const rejected = [];
@@ -44,7 +45,12 @@ async function ingestUploads(actor, projectId, files) {
       // Extension and browser MIME are NOT trusted: inspect the bytes.
       const head = await storage.readHead(f.path, 131072);
       if (!looksLikeMp3(head)) { rejected.push({ name: safeMp3Name(f.originalname), reason: 'Not a valid MP3 file.' }); await storage.discard(f.path); continue; }
-      const duration = estimateDuration(head, f.size);   // best-effort; a miss never fails the upload
+      let duration = null;
+      if (clientDurations && typeof clientDurations[f.originalname] === 'number' && clientDurations[f.originalname] > 0) {
+        duration = Math.round(clientDurations[f.originalname]);
+      } else {
+        duration = estimateDuration(head, f.size);
+      }
       const { key, sha256 } = await storage.put(f.path);
       const t = await AudioTrack.create({ project: project._id, originalName: safeMp3Name(f.originalname), storageKey: key, size: f.size, mime: 'audio/mpeg', duration, sha256, uploadedBy: actor._id });
       tracks.push(t);
@@ -91,13 +97,42 @@ async function assign(actor, { trackIds, assigneeIds, deadline }) {
     }
   }
   const newly = new Set(fresh.map((d) => String(d.assignee)));
-  if (added) await activity.log(`${actor.name} assigned ${trackIds.length} MP3${trackIds.length === 1 ? '' : 's'} to ${assigneeIds.length} employee${assigneeIds.length === 1 ? '' : 's'}.`, { actor: actor._id, involved: assigneeIds, type: 'audio', rooms: ['admin', ...assigneeIds.map((i) => `user:${i}`)] });
+  if (added) await activity.log(`${actor.name} assigned ${trackIds.length} MP3${trackIds.length === 1 ? '' : 's'} to ${assigneeIds.length} employee${assigneeIds.length === 1 ? '' : 's'}.`, { actor: actor._id, involved: assigneeIds, type: 'audio', rooms: ['admin'] });
   for (const id of newly) emit([`user:${id}`], 'track:assigned', { count: added });
   return { added, alreadyAssigned: docs.length - added };
 }
 
+// Sequential 1-by-1 queue for employees:
+// When admin assigns multiple audios, an employee only sees completed audios
+// plus at most ONE active audio to work on. Future queued audios stay hidden.
+function filterEmployeeQueue(assignments) {
+  const completed = [];
+  const pendingQueue = [];
+
+  for (const a of assignments) {
+    const isDone = Boolean(a.submittedAt && ['submitted', 'approved', 'reviewed', 'pending'].includes(a.status));
+    if (isDone) {
+      completed.push(a);
+    } else {
+      pendingQueue.push(a);
+    }
+  }
+
+  pendingQueue.sort((x, y) => {
+    const isRevX = x.status === 'revision_requested' || x.status === 'revision' ? 0 : 1;
+    const isRevY = y.status === 'revision_requested' || y.status === 'revision' ? 0 : 1;
+    return isRevX - isRevY;
+  });
+
+  const active = pendingQueue.length > 0 ? [pendingQueue[0]] : [];
+  return [...completed, ...active];
+}
+
 async function assignedFor(viewer) {
-  const asg = await TrackAssignment.find({ assignee: viewer._id }).sort({ assignedAt: -1 }).lean();
+  let asg = await TrackAssignment.find({ assignee: viewer._id }).sort({ assignedAt: 1, _id: 1 }).lean();
+  if (viewer.role === 'employee') {
+    asg = filterEmployeeQueue(asg);
+  }
   const [tracks, notes, projects] = await Promise.all([
     AudioTrack.find({ _id: { $in: asg.map((a) => a.track) } }).lean(), NotebookEntry.find({ user: viewer._id }).lean(), Project.find({ _id: { $in: asg.map((a) => a.project) } }).lean(),
   ]);
@@ -218,10 +253,13 @@ async function saveNote(viewer, trackId, text) {
   const asg = await TrackAssignment.findOne({ track: trackId, assignee: viewer._id });
   if (!asg) throw notFound('That MP3 is no longer available.');
   const clean = text.trim();
+  const prev = await NotebookEntry.findOne({ user: viewer._id, track: trackId }).lean();
   const n = await NotebookEntry.findOneAndUpdate({ user: viewer._id, track: trackId }, { $set: { text: clean, updatedAt: new Date() } }, { upsert: true, new: true, setDefaultsOnInsert: true });
   if (asg.status === 'assigned' && clean) { asg.status = 'in_progress'; asg.startedAt = asg.startedAt || new Date(); await asg.save(); }
   const track = await AudioTrack.findById(trackId).select('originalName').lean();
-  await activity.log(`${viewer.name} updated the translation draft for ${track?.originalName || 'an assigned MP3'}.`, { actor: viewer._id, type: 'notebook', rooms: ['admin', `user:${viewer._id}`] });
+  if (clean && clean !== prev?.text) {
+    await activity.log(`${viewer.name} updated the translation draft for ${track?.originalName || 'an assigned MP3'}.`, { actor: viewer._id, type: 'notebook', rooms: ['admin'] });
+  }
   return { trackId, text: n.text, updatedAt: n.updatedAt, status: asg.status };
 }
 
@@ -238,29 +276,22 @@ async function submitTranslation(viewer, assignmentId) {
   n.version = version; n.submittedAt = now; n.submittedText = text; n.text = text;
   await n.save();
 
-  // Validate "Word's First Letter Must Be In Capital Letter" criterion:
-  const words = text.split(/\s+/).filter(Boolean);
-  let isCapitalCriteriaFulfilled = words.length > 0;
-  for (const w of words) {
-    const match = w.match(/[a-zA-Z]/);
-    if (match && match[0] !== match[0].toUpperCase()) {
-      isCapitalCriteriaFulfilled = false;
-      break;
-    }
-  }
+  // Validate all 6 transcription rules:
+  const validation = validateTranscriptRules(text);
+  const passedAllRules = validation.passed;
 
-  // Automatic approval if criterion fulfilled, otherwise pending
-  asg.status = isCapitalCriteriaFulfilled ? 'approved' : 'pending';
+  // Automatic approval if ALL rules pass, otherwise pending
+  asg.status = passedAllRules ? 'approved' : 'pending';
   asg.submittedAt = now;
-  asg.reviewFeedback = isCapitalCriteriaFulfilled ? 'Auto-approved: Capital letter criterion met' : 'Pending: Capital letter criterion not met';
+  asg.reviewFeedback = validation.feedback;
   await asg.save();
 
   const track = await AudioTrack.findById(asg.track).select('originalName project').lean();
   const proj = track?.project ? await Project.findById(track.project).select('name').lean() : null;
 
   // Update any matching Task in Task collection for this employee
-  const targetTaskStatus = isCapitalCriteriaFulfilled ? 'Approved' : 'Pending';
-  const targetTaskProgress = isCapitalCriteriaFulfilled ? 100 : 50;
+  const targetTaskStatus = passedAllRules ? 'Approved' : 'Pending';
+  const targetTaskProgress = passedAllRules ? 100 : 50;
 
   const rxTrack = track?.originalName ? new RegExp(track.originalName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') : null;
   const rxProj = proj?.name ? new RegExp(proj.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') : null;
@@ -284,9 +315,9 @@ async function submitTranslation(viewer, assignmentId) {
     emit(audienceFor(viewer), 'task:updated', { task: dto.task(t), reassigned: false });
   }
 
-  const verb = isCapitalCriteriaFulfilled ? 'submitted and auto-approved' : 'submitted (pending)';
+  const verb = passedAllRules ? 'submitted and auto-approved' : 'submitted (pending)';
   await activity.log(`${viewer.name} ${verb} a translation for ${track?.originalName || 'an assigned MP3'}.`, { actor: viewer._id, type: 'notebook', rooms: ['admin', `user:${viewer._id}`] });
-  return dto.assignment(asg.toObject(), { version, submittedText: text, isCapitalCriteriaFulfilled, taskStatus: targetTaskStatus });
+  return dto.assignment(asg.toObject(), { version, submittedText: text, passedAllRules, taskStatus: targetTaskStatus });
 }
 
 /** Admin/leader reviews a submitted translation. */
@@ -311,7 +342,199 @@ async function reviewAssignment(actor, assignmentId, { decision, feedback }) {
   return dto.assignment(asg.toObject());
 }
 
+
+async function listAllTracks(actor) {
+  const [tracks, projects, assignments, users] = await Promise.all([
+    AudioTrack.find().sort({ createdAt: -1 }).lean(),
+    Project.find().select('name').lean(),
+    TrackAssignment.find().select('track assignee status assignedAt').lean(),
+    User.find().select('name email').lean(),
+  ]);
+
+  const pMap = new Map(projects.map((p) => [String(p._id), p.name]));
+  const uMap = new Map(users.map((u) => [String(u._id), u.name]));
+
+  return tracks.map((t) => {
+    const asgs = assignments.filter((a) => String(a.track) === String(t._id));
+    return {
+      ...dto.track(t),
+      project: String(t.project),
+      projectName: pMap.get(String(t.project)) || 'Project',
+      isAssigned: asgs.length > 0,
+      assignedCount: asgs.length,
+      assignments: asgs.map((a) => ({
+        id: String(a._id),
+        assigneeId: String(a.assignee),
+        assigneeName: uMap.get(String(a.assignee)) || 'Employee',
+        status: a.status,
+        assignedAt: a.assignedAt,
+      })),
+    };
+  });
+}
+
+async function updateTrackDuration(actor, trackId, duration) {
+  if (!isId(trackId)) throw notFound('Track not found.');
+  const dur = Math.round(Number(duration));
+  if (!dur || dur <= 0) throw bad('Invalid duration.');
+  const t = await AudioTrack.findByIdAndUpdate(trackId, { duration: dur }, { new: true });
+  if (!t) throw notFound('Track not found.');
+  return dto.track(t);
+}
+
+async function deleteTrack(actor, trackId) {
+  if (!isId(trackId)) throw notFound('Track not found.');
+  const track = await AudioTrack.findById(trackId);
+  if (!track) throw notFound('Track not found.');
+
+  await Promise.all([
+    AudioTrack.deleteOne({ _id: track._id }),
+    TrackAssignment.deleteMany({ track: track._id }),
+    NotebookEntry.deleteMany({ track: track._id }),
+  ]);
+
+  try {
+    if (track.storageKey) await storage.discard(track.storageKey);
+  } catch (e) {
+    // Ignore if file missing from disk
+  }
+
+  await activity.log(`${actor.name} deleted audio track "${track.originalName}".`, {
+    actor: actor._id,
+    type: 'audio',
+    rooms: ['admin'],
+  });
+
+  return { deleted: true };
+}
+
+async function assignmentsSummary(actor) {
+  const ids = await scopedAssigneeIds(actor);
+  const match = ids === H.ALL ? {} : { assignee: { $in: [...ids].map(oid) } };
+
+  const employees = await User.find({ role: 'employee' }).select('name email legacyId status').sort({ name: 1 }).lean();
+  const assignments = await TrackAssignment.find(match).populate('track', 'duration size sha256 storageKey originalName').lean();
+
+  const DONE_STATUSES = new Set(['submitted', 'reviewed', 'approved']);
+
+  const map = new Map();
+  for (const emp of employees) {
+    map.set(String(emp._id), {
+      id: String(emp._id),
+      name: emp.name,
+      email: emp.email,
+      legacyId: emp.legacyId || null,
+      totalAudioGiven: 0,
+      totalAudioDone: 0,
+      totalDurationGivenSec: 0,
+      totalDurationDoneSec: 0,
+    });
+  }
+
+  const seenGiven = new Map();
+  const seenDone = new Map();
+
+  for (const a of assignments) {
+    const empId = String(a.assignee);
+    let row = map.get(empId);
+    if (!row) {
+      row = {
+        id: empId,
+        name: 'Employee',
+        email: 'employee@pulse.test',
+        legacyId: null,
+        totalAudioGiven: 0,
+        totalAudioDone: 0,
+        totalDurationGivenSec: 0,
+        totalDurationDoneSec: 0,
+      };
+      map.set(empId, row);
+    }
+    let dur = 0;
+    if (a.track) {
+      if (typeof a.track.duration === 'number' && a.track.duration > 0) {
+        dur = a.track.duration;
+      } else if (a.track.size && a.track.size > 0) {
+        dur = Math.round(a.track.size / 24000);
+      } else {
+        dur = 30;
+      }
+    }
+    row.totalAudioGiven += 1;
+    if (!seenGiven.has(empId)) seenGiven.set(empId, new Set());
+    if (!seenDone.has(empId)) seenDone.set(empId, new Set());
+    const t = a.track;
+    const trackKey = t?.sha256 || t?.storageKey || (t?.size ? `${t.size}_${t.duration}` : String(t?._id || a.track));
+    if (!seenGiven.get(empId).has(trackKey)) {
+      seenGiven.get(empId).add(trackKey);
+      row.totalDurationGivenSec += dur;
+    }
+    if (DONE_STATUSES.has(a.status)) {
+      row.totalAudioDone += 1;
+      if (!seenDone.get(empId).has(trackKey)) {
+        seenDone.get(empId).add(trackKey);
+        row.totalDurationDoneSec += dur;
+      }
+    }
+  }
+
+  return [...map.values()];
+}
+
+
+async function myWorkHistory(viewer) {
+  const asgs = await TrackAssignment.find({ assignee: viewer._id }).sort({ submittedAt: -1, assignedAt: -1, _id: -1 }).lean();
+  const trackIds = asgs.map((a) => a.track);
+  const [tracks, notes, projects] = await Promise.all([
+    AudioTrack.find({ _id: { $in: trackIds } }).lean(),
+    NotebookEntry.find({ user: viewer._id, track: { $in: trackIds } }).lean(),
+    Project.find({ _id: { $in: asgs.map((a) => a.project) } }).lean(),
+  ]);
+
+  const trackMap = new Map(tracks.map((t) => [String(t._id), t]));
+  const noteMap = new Map(notes.map((n) => [String(n.track), n]));
+  const projMap = new Map(projects.map((p) => [String(p._id), p.name]));
+
+  const submitted = asgs.filter(
+    (a) => a.submittedAt || ['submitted', 'approved', 'reviewed', 'pending', 'revision_requested', 'revision'].includes(a.status)
+  );
+
+  return submitted.map((a) => {
+    const t = trackMap.get(String(a.track));
+    const n = noteMap.get(String(a.track));
+    const durSec = t?.duration || (t?.size ? Math.round(t.size / 24000) : 180);
+    const dateObj = a.submittedAt || a.assignedAt || new Date();
+
+    let statusText = 'Pending';
+    if (a.status === 'approved' || a.status === 'reviewed') statusText = 'Approved';
+    else if (a.status === 'revision_requested' || a.status === 'revision') statusText = 'Revision';
+    else statusText = 'Pending';
+
+    return {
+      id: String(a._id),
+      assignmentId: String(a._id),
+      trackId: String(a.track),
+      trackName: t?.originalName || 'Audio Track',
+      track: t ? dto.track(t) : null,
+      projectName: projMap.get(String(a.project)) || 'Project',
+      text: (n?.submittedText || n?.text || '').trim(),
+      durationSec: durSec,
+      status: statusText,
+      rawStatus: a.status,
+      date: dateObj,
+      submittedAt: dateObj,
+      reviewFeedback: a.reviewFeedback || '',
+    };
+  });
+}
+
 module.exports = {
+  myWorkHistory,
+  filterEmployeeQueue,
+  listAllTracks,
+  deleteTrack,
+  updateTrackDuration,
+  assignmentsSummary,
   createProject, listProjects, listTracks, ingestUploads, authorizeTrack, assign, assignedFor, getNote, saveNote,
   listAssignments, getAssignment, reassignAssignment, removeAssignment, submitTranslation, reviewAssignment,
 };

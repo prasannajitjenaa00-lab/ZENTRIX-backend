@@ -6,6 +6,7 @@ const { validate, rules: r } = require('../validators');
 const packages = require('../services/packages');
 const usersSvc = require('../services/users');
 const chat = require('../services/chat');
+const help = require('../services/help');
 const activity = require('../services/activity');
 const dashboard = require('../services/dashboard');
 const auth = require('../services/auth');
@@ -20,7 +21,7 @@ const admin = requireRole('admin');
 const leaders = requireRole('admin', 'floor_manager', 'team_leader');
 
 const pkg = express.Router();
-const pkgBody = { name: r.string({ min: 1, max: 80 }), amount: r.number({ min: 0, max: 1e9, optional: true }), currency: r.string({ max: 4, optional: true, allowEmpty: true }), note: r.string({ max: 300, optional: true, allowEmpty: true }) };
+const pkgBody = { name: r.string({ min: 1, max: 80 }), amount: r.number({ min: 0, max: 1e9, optional: true }), ratePerHour: r.number({ min: 0, max: 1e9, optional: true }), currency: r.string({ max: 4, optional: true, allowEmpty: true }), note: r.string({ max: 300, optional: true, allowEmpty: true }) };
 pkg.get('/', admin, asyncHandler(async (req, res) => ok(res, await packages.list())));
 pkg.post('/', admin, asyncHandler(async (req, res) => ok(res, await packages.create(req.user, validate(req.body, pkgBody)), undefined, 201)));
 pkg.patch('/:id', admin, asyncHandler(async (req, res) => ok(res, await packages.update(req.user, req.params.id, validate(req.body, { ...pkgBody, name: r.string({ min: 1, max: 80, optional: true }) })))));
@@ -32,6 +33,11 @@ wallet.get('/me', asyncHandler(async (req, res) => ok(res, await usersSvc.wallet
 const chatR = express.Router();
 chatR.get('/', asyncHandler(async (req, res) => ok(res, await chat.list({ limit: req.query.limit, before: req.query.before }))));
 chatR.post('/', admin, asyncHandler(async (req, res) => ok(res, await chat.post(req.user, validate(req.body, { text: r.string({ min: 1, max: 500 }) }).text), undefined, 201)));
+
+const helpR = express.Router();
+helpR.get('/', asyncHandler(async (req, res) => ok(res, await help.list(req.user, { limit: req.query.limit }))));
+helpR.post('/', asyncHandler(async (req, res) => ok(res, await help.post(req.user, validate(req.body, { text: r.string({ min: 1, max: 500 }) }).text), undefined, 201)));
+helpR.patch('/:id/resolve', admin, asyncHandler(async (req, res) => ok(res, await help.resolve(req.user, req.params.id, req.body || {}))));
 
 const act = express.Router();
 act.get('/', asyncHandler(async (req, res) => ok(res, await activity.listFor(req.user, Math.min(Number(req.query.limit) || 40, 100)))));
@@ -49,4 +55,4 @@ devices.get('/', asyncHandler(async (req, res) => {
 }));
 devices.delete('/', asyncHandler(async (req, res) => { await auth.clearTrustedDevices(req.user._id); res.clearCookie(require('../config/env').getConfig().session.trustedCookieName, { path: '/api/auth' }); ok(res, { cleared: true }); }));
 
-module.exports = { pkg, wallet, chat: chatR, activity: act, dashboard: dash, mfa, devices };
+module.exports = { pkg, wallet, chat: chatR, help: helpR, activity: act, dashboard: dash, mfa, devices };

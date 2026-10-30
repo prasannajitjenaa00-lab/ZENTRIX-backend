@@ -41,10 +41,12 @@ function createApp() {
   app.use('/api/tasks', secured, require('./routes/tasks'));
   app.use('/api/packages', secured, misc.pkg);
   app.use('/api/wallet', secured, misc.wallet);
+  app.use('/api/withdrawals', secured, require('./routes/withdrawals'));
   app.use('/api/projects', secured, audio.projects);
   app.use('/api/audio', secured, audio.audio);
   app.use('/api/notebooks', secured, audio.notebooks);
   app.use('/api/chat', secured, misc.chat);
+  app.use('/api/help', secured, misc.help);
   app.use('/api/activity', secured, misc.activity);
   app.use('/api/dashboard', secured, misc.dashboard);
   app.use('/api/mfa', secured, misc.mfa);
