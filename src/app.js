@@ -46,6 +46,7 @@ function createApp() {
   app.use('/api/audio', secured, audio.audio);
   app.use('/api/notebooks', secured, audio.notebooks);
   app.use('/api/chat', secured, misc.chat);
+  app.use('/api/help', secured, misc.help);
   app.use('/api/activity', secured, misc.activity);
   app.use('/api/dashboard', secured, misc.dashboard);
   app.use('/api/mfa', secured, misc.mfa);

@@ -1,5 +1,6 @@
 'use strict';
 const { Task, AudioTrack, Project, TrackAssignment, NotebookEntry, User } = require('../models');
+const { filterEmployeeQueue } = require('./audio');
 const dto = require('./dto');
 const H = require('../policy/hierarchy');
 const { classifyMembers, avgProgress, statusCounts } = require('../policy/members');
@@ -22,6 +23,16 @@ async function overview(viewer) {
   const tasks = await scopedTasks(roster, me);
   const counts = statusCounts(tasks);
   const crew = H.activeCrew(roster, me);
+
+  // Audio completion metrics
+  const ids = H.visibleAssigneeIds(roster, me);
+  const asgFilter = ids === H.ALL ? {} : { assignee: { $in: [...ids].map((i) => new mongoose.Types.ObjectId(i)) } };
+  const allAssignments = await TrackAssignment.find(asgFilter).select('status').lean();
+  const completedAudiosFromAsg = allAssignments.filter((a) => ['approved', 'reviewed', 'submitted'].includes(a.status)).length;
+  const completedTasks = tasks.filter((t) => t.status === 'Completed' || t.status === 'Approved').length;
+  const completedAudios = Math.max(completedAudiosFromAsg, completedTasks);
+  const totalAudios = Math.max(allAssignments.length, tasks.length);
+
   const late = tasks.filter((t) => isOverdue(t, today));
   const { active, inactive } = classifyMembers(H.memberScope(roster, me), tasks.map((t) => ({ assigneeId: t.assigneeId, updatedAt: t.updatedAt })));
   const byId = new Map(roster.map((u) => [u.id, u]));
@@ -32,8 +43,9 @@ async function overview(viewer) {
     today,
     kpis: {
       activeCrew: crew.length, accounts: me.role === 'admin' ? roster.length : crew.length,
-      openWork: tasks.filter((t) => t.status !== 'Completed').length, totalTasks: tasks.length, avgProgress: avgProgress(tasks),
+      openWork: tasks.filter((t) => t.status !== 'Completed' && t.status !== 'Approved').length, totalTasks: tasks.length, avgProgress: avgProgress(tasks),
       completed: counts.Completed, completionRate: tasks.length ? Math.round((counts.Completed / tasks.length) * 100) : 0, overdue: late.length,
+      completedAudios, totalAudios,
     },
     statusCounts: counts,
     activeMembers: active.map((p) => ({ ...dto.userPublic(p), email: p.email, phone: p.phone, lastLoginAt: p.lastLoginAt, ...load(p) })),
@@ -57,7 +69,8 @@ async function mine(viewer) {
   const open = tasks.filter((t) => t.status !== 'Completed');
   const dueSoon = open.filter((t) => t.due <= addDays(today, 7)).sort((a, b) => a.due.localeCompare(b.due));
   const u = await User.findById(viewer._id).populate('package');
-  const asg = await TrackAssignment.find({ assignee: viewer._id }).lean();
+  let asg = await TrackAssignment.find({ assignee: viewer._id }).sort({ assignedAt: 1, _id: 1 }).lean();
+  asg = filterEmployeeQueue(asg);
   const [tracks, notes, projects] = await Promise.all([
     AudioTrack.find({ _id: { $in: asg.map((a) => a.track) } }).lean(),
     NotebookEntry.find({ user: viewer._id }).lean(),

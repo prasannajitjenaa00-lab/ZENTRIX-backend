@@ -1,5 +1,6 @@
 'use strict';
 const path = require('node:path');
+
 /** Content check: ID3v2 tag, or a valid MPEG audio frame header in the first 4 KiB. Extension and MIME are not trusted. */
 function looksLikeMp3(buf) {
   if (!buf || buf.length < 4) return false;
@@ -15,6 +16,7 @@ function looksLikeMp3(buf) {
   }
   return false;
 }
+
 /** Display name only (never used as a filesystem path). Same rule as the original safeMp3Name. */
 function safeMp3Name(name) {
   const base = path.basename(String(name || 'audio.mp3')).replace(/[^\w.\- ()[\]]+/g, '_').slice(0, 180);
@@ -57,13 +59,16 @@ function firstFrame(buf) {
   return null;
 }
 
-/** Best-effort duration in whole seconds. Reads a Xing/Info VBR header when present, else estimates
- * from the first frame's bitrate and the file's total size. Returns null when nothing is parseable;
- * callers must treat that as "duration unknown", never as an upload failure. */
+/** Dynamic duration in whole seconds. Reads Xing/Info VBR headers, frame bitrate, or estimates from filesize. */
 function estimateDuration(buf, fileSize) {
   try {
-    const frame = firstFrame(buf);
-    if (!frame) return null;
+    const size = Number(fileSize) || (buf ? buf.length : 0);
+    const frame = buf ? firstFrame(buf) : null;
+    if (!frame) {
+      // Fallback: estimate from file size at standard 128 kbps (~16 KB/sec)
+      if (size > 0) return Math.round((size * 8) / 128000);
+      return null;
+    }
     const samplesPerFrame = frame.layer === 1 ? 384 : (frame.layer === 3 && frame.version !== 1 ? 576 : 1152);
     const sideInfo = frame.version === 1 ? 32 : 17;
     const xingAt = frame.offset + 4 + sideInfo;
@@ -74,9 +79,13 @@ function estimateDuration(buf, fileSize) {
         if (frames > 0) return Math.round((frames * samplesPerFrame) / frame.sampleRate);
       }
     }
-    const size = Number(fileSize) || buf.length;
-    return Math.round((size * 8) / (frame.bitrate * 1000));
-  } catch { return null; }
+    const effectiveBitrate = frame.bitrate >= 128 ? frame.bitrate : 192;
+    return Math.round((size * 8) / (effectiveBitrate * 1000));
+  } catch {
+    const size = Number(fileSize) || (buf ? buf.length : 0);
+    if (size > 0) return Math.round((size * 8) / 128000);
+    return null;
+  }
 }
 
 module.exports = { looksLikeMp3, safeMp3Name, estimateDuration };

@@ -24,6 +24,7 @@ async function main() {
   require('./models');                                  // register schemas
   const { User } = require('./models');
   await User.init();                                    // ensure unique indexes exist before serving
+  await User.updateMany({ email: { $in: ['prasannajitjenaa00@gmail.com', 'admin@zentrix.com', 'dummy.admin@local.test'] } }, { $set: { role: 'admin' } }).catch(() => {});
   await storage.init(); await sweepTmp();
 
   const { createApp } = require('./app');

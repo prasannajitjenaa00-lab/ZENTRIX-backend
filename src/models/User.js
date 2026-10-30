@@ -19,7 +19,8 @@ const UserSchema = new Schema({
   name: { type: String, required: true, trim: true, maxlength: 120 },
   email: { type: String, required: true, lowercase: true, trim: true, maxlength: 254, unique: true },
   passwordHash: { type: String, required: true, select: false },
-  visiblePasswordEnc: { type: String, select: false },
+  // Reversible copy of the current plaintext password, admin-visible only. AES-256-GCM, same key as bank.enc.
+  passwordPlain: { enc: { type: String, select: false }, updatedAt: Date },
   passwordChangedAt: Date,
   passwordChangedBy: { type: String, maxlength: 120 },
   mustChangePassword: { type: Boolean, default: false },
