@@ -97,24 +97,30 @@ const ENUMS = {
   userStatus: ['Active', 'Suspended'],
 };
 
-/** Bank & KYC rules. Supports flexible fields for complete or partial KYC records. */
+/** Bank rules from the original Profile form. */
 function validateBank(input) {
   const holder = String(input.holder || '').trim();
   const name = String(input.name || '').trim();
   const account = String(input.account || '').trim();
   const ifsc = String(input.ifsc || '').trim().toUpperCase();
-  const upi = String(input.upi || '').trim();
-  const aadharPan = String(input.aadharPan || '').trim();
   const details = {};
 
-  if (account && (account.length < 6 || account.length > 30 || !/^\d+$/.test(account))) {
-    details.account = 'Account number looks invalid.';
+  if (!holder) details.holder = 'Required.';
+  if (!name) details.name = 'Required.';
+  if (!account) details.account = 'Required.';
+  else if (account.length < 6 || account.length > 20 || !/^\d+$/.test(account)) details.account = 'Account number looks invalid.';
+  if (!ifsc) details.ifsc = 'Required.';
+  else if (!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(ifsc)) details.ifsc = 'IFSC must be 11 characters (e.g. SBIN0001234).';
+
+  if (Object.keys(details).length) throw new AppError(400, 'VALIDATION_ERROR', 'Check the bank details.', details);
+  const out = { holder, name, account, ifsc };
+  if (input.upi !== undefined && input.upi !== null && String(input.upi).trim() !== '') {
+    out.upi = String(input.upi).trim();
   }
-  if (ifsc && !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(ifsc)) {
-    details.ifsc = 'IFSC must be 11 characters (e.g. SBIN0001234).';
+  if (input.aadharPan !== undefined && input.aadharPan !== null && String(input.aadharPan).trim() !== '') {
+    out.aadharPan = String(input.aadharPan).trim();
   }
-  if (Object.keys(details).length) throw new AppError(400, 'VALIDATION_ERROR', 'Check the bank/KYC details.', details);
-  return { holder, name, account, ifsc, upi, aadharPan };
+  return out;
 }
 
 module.exports = { validate, rules: rules, ENUMS, validateBank };
