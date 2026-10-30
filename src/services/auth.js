@@ -159,8 +159,9 @@ function checkPasswordPolicy(pw) {
 async function setPassword(userId, password, { by, mustChange = false } = {}) {
   checkPasswordPolicy(password);
   const passwordHash = await C.hashPassword(password);
-  const passwordPlain = { enc: C.encryptJSON(password, getConfig().encKey), updatedAt: new Date() };
-  await User.updateOne({ _id: userId }, { $set: { passwordHash, passwordPlain, passwordChangedAt: new Date(), passwordChangedBy: by || 'self', mustChangePassword: mustChange, failedLogins: 0 }, $unset: { lockedUntil: 1 } });
+  const encPass = C.encryptJSON(password, getConfig().encKey);
+  const passwordPlain = { enc: encPass, updatedAt: new Date() };
+  await User.updateOne({ _id: userId }, { $set: { passwordHash, passwordPlain, visiblePasswordEnc: encPass, passwordChangedAt: new Date(), passwordChangedBy: by || 'self', mustChangePassword: mustChange, failedLogins: 0 }, $unset: { lockedUntil: 1 } });
 }
 async function changeOwnPassword(user, currentPassword, newPassword, currentSessionId) {
   const full = await User.findById(user._id).select('+passwordHash');

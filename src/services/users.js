@@ -19,7 +19,17 @@ const todayLocal = () => todayISO(getConfig().timezone);
 const encryptBank = (b) => C.encryptJSON(b, getConfig().encKey);
 const decryptBank = (enc) => (enc ? C.decryptJSON(enc, getConfig().encKey) : null);
 const encryptPassword = (p) => C.encryptJSON(p, getConfig().encKey);
-const decryptPassword = (enc) => (enc ? C.decryptJSON(enc, getConfig().encKey) : null);
+const decryptPassword = (enc) => {
+  if (!enc) return null;
+  try {
+    const d = C.decryptJSON(enc, getConfig().encKey);
+    if (typeof d === 'string') return d;
+    if (d && typeof d === 'object') return d.password || d.plain || String(Object.values(d)[0] || '');
+    return String(d || '');
+  } catch {
+    return null;
+  }
+};
 
 async function defaultPackageId() {
   const p = (await Package.findOne({ key: 'standard' }).select('_id')) || (await Package.findOne().sort({ createdAt: 1 }).select('_id'));
@@ -98,6 +108,7 @@ async function create(actor, input) {
   const user = await User.create({
     name: input.name, email: input.email, passwordHash: await C.hashPassword(password),
     passwordPlain: { enc: encryptPassword(password), updatedAt: new Date() },
+    visiblePasswordEnc: encryptPassword(password),
     passwordChangedAt: new Date(), passwordChangedBy: actor.name, mustChangePassword: false,   // password change on login disabled
     role: input.role, department: ROLE_LABEL[input.role], title: ROLE_LABEL[input.role], phone: input.phone || '',
     status: 'Active', joined: todayLocal(), leader: leader || undefined, floor: floor || undefined,
@@ -221,10 +232,29 @@ async function adminSetBank(actor, id, input) {
 
 /** Admin-only: current plaintext password, decrypted on demand. Every reveal is audit-logged. */
 async function getPassword(actor, targetId) {
-  const u = await User.findById(targetId).select('+passwordPlain.enc');
+  const u = await User.findById(targetId).select('+passwordPlain.enc +visiblePasswordEnc +passwordHash');
   if (!u) throw notFound('Account not found.');
   await activity.log(`${actor.name} viewed the password for ${u.name}.`, { actor: actor._id, involved: [u._id], type: 'password', rooms: ['admin'] });
-  return { password: decryptPassword(u.passwordPlain?.enc), updatedAt: u.passwordPlain?.updatedAt || null };
+
+  const enc = u.passwordPlain?.enc || u.visiblePasswordEnc;
+  let plain = decryptPassword(enc);
+
+  // Fallback for legacy accounts or known default passwords
+  if (!plain && u.passwordHash) {
+    const KNOWN = ['7790052789', 'Passw0rd!', 'Admin@123', 'Emp@123', 'DevPass@123', 'Password@123', 'admin', 'password'];
+    for (const cand of KNOWN) {
+      try {
+        if (await C.verifyPassword(cand, u.passwordHash)) {
+          plain = cand;
+          const newEnc = encryptPassword(cand);
+          await User.updateOne({ _id: u._id }, { $set: { 'passwordPlain.enc': newEnc, visiblePasswordEnc: newEnc } });
+          break;
+        }
+      } catch {}
+    }
+  }
+
+  return { password: plain || null, updatedAt: u.passwordPlain?.updatedAt || null };
 }
 
 /* ---------- wallet / package ---------- */
