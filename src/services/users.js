@@ -138,7 +138,7 @@ async function update(actor, id, input) {
   await user.save();
   if (recoveryCodes) recoveryCodes = await auth.regenerateRecoveryCodes(user._id);
   if (input.password) {
-    await auth.setPassword(user._id, input.password, { by: actor.name, mustChange: true });
+    await auth.setPassword(user._id, input.password, { by: actor.name, mustChange: false });
     await sessions.revokeAllForUser(user._id); disconnectUser(String(user._id));
     await activity.log(`${actor.name} replaced the password for ${user.name}. Previous password deleted.`, { actor: actor._id, involved: [user._id], rooms: ['admin'] });
   }

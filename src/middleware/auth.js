@@ -16,10 +16,7 @@ const requireAuth = asyncHandler(async (req, _res, next) => {
 /** Accounts created/reset by an admin must pick their own password before using anything else. */
 const ALLOWED_WHILE_MUST_CHANGE = new Set(['/api/auth/me', '/api/auth/password', '/api/auth/logout']);
 function enforcePasswordChange(req, _res, next) {
-  const path = req.baseUrl + req.path;
-  if (req.user?.mustChangePassword && !ALLOWED_WHILE_MUST_CHANGE.has(path.replace(/\/$/, ''))) {
-    return next(new AppError(403, 'PASSWORD_CHANGE_REQUIRED', 'Set a new password to continue.'));
-  }
+  // Disabled: Users access workspace directly with login credentials without forced password reset
   next();
 }
 const requireRole = (...roles) => (req, _res, next) => (roles.includes(req.user?.role) ? next() : next(forbidden()));
