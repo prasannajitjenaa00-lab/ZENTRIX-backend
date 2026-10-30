@@ -182,6 +182,7 @@ async function getBank(viewer, targetId) {
   if (!u) throw notFound();
   return { details: decryptBank(u.bank?.enc), locked: !!u.bank?.locked, hasDetails: !!u.bank?.hasDetails, updatedAt: u.bank?.updatedAt || null };
 }
+
 /** Original: first successful save locks. Locked => only admin may change. */
 async function saveOwnBank(viewer, input) {
   const u = await User.findById(viewer._id);
@@ -192,6 +193,7 @@ async function saveOwnBank(viewer, input) {
   await activity.log(`${u.name} updated bank details.`, { actor: u._id, type: 'bank', rooms: ['admin'] });
   return { locked: true, updatedAt: u.bank.updatedAt };
 }
+
 /** Admin path from the account modal: any non-empty field saves + sets lock = !unlock; only-unlock just unlocks. */
 async function adminSetBank(actor, id, input) {
   const u = await User.findById(id);
