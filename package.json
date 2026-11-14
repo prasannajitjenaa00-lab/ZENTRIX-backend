@@ -15,7 +15,8 @@
     "seed": "node scripts/seed-dev.js",
     "seed:reference": "node scripts/seed-reference-data.js",
     "create-user": "node scripts/create-user.js",
-    "migrate": "node scripts/migrate-from-json.js"
+    "migrate": "node scripts/migrate-from-json.js",
+    "backfill-employee-data": "node scripts/backfill-employee-data.js"
   },
   "dependencies": {
     "cookie": "^0.7.2",

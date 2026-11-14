@@ -80,9 +80,9 @@ async function startChallenge(user) {
   await MfaChallenge.create({ _id, user: user._id, codeHash: peppered(`${_id}:${code}`), expiresAt: new Date(Date.now() + cfg.auth.mfaTtlMs) });
   const preview = await sendMail({
     to: user.email,
-    subject: 'Your Zentrix Pulse sign-in code',
-    text: `Hi ${user.name.split(' ')[0]},\n\nYour Pulse sign-in code is ${code}.\nIt expires in ${Math.round(cfg.auth.mfaTtlMs / 60000)} minutes.\n\n— Zentrix Pulse`,
-    preview: { to: user.email, subject: 'Your Zentrix Pulse sign-in code', code },
+    subject: 'Your Zentrix Projects sign-in code',
+    text: `Hi ${user.name.split(' ')[0]},\n\nYour Projects sign-in code is ${code}.\nIt expires in ${Math.round(cfg.auth.mfaTtlMs / 60000)} minutes.\n\n— Zentrix Projects`,
+    preview: { to: user.email, subject: 'Your Zentrix Projects sign-in code', code },
   });
   return { challengeId: String(_id), devPreview: preview };
 }
@@ -183,13 +183,13 @@ async function forgot(email) {
     await PasswordResetToken.create({ user: user._id, tokenHash: peppered(`reset:${raw}`), expiresAt: new Date(Date.now() + cfg.auth.resetTtlMs) });
     const link = `${cfg.frontendOrigin}/#reset=${raw}`;
     preview = await sendMail({
-      to: user.email, subject: 'Reset your Zentrix Pulse password',
-      text: `Hi ${user.name.split(' ')[0]},\n\nWe received a request to reset your Pulse password.\nThis link expires in ${Math.round(cfg.auth.resetTtlMs / 60000)} minutes and works once:\n\n${link}\n\nIf you did not ask for this, you can ignore the letter.\n\n— Zentrix Pulse`,
-      preview: { to: user.email, subject: 'Reset your Zentrix Pulse password', link },
+      to: user.email, subject: 'Reset your Zentrix Projects password',
+      text: `Hi ${user.name.split(' ')[0]},\n\nWe received a request to reset your Projects password.\nThis link expires in ${Math.round(cfg.auth.resetTtlMs / 60000)} minutes and works once:\n\n${link}\n\nIf you did not ask for this, you can ignore the letter.\n\n— Zentrix Projects`,
+      preview: { to: user.email, subject: 'Reset your Zentrix Projects password', link },
     });
   }
   // Identical response whether or not the account exists (original leaked this via `preview`).
-  return { message: 'If that inbox is on Pulse, a reset letter is on its way.', devPreview: preview };
+  return { message: 'If that inbox is on Projects, a reset letter is on its way.', devPreview: preview };
 }
 async function resetVerify(token) {
   const rec = await PasswordResetToken.findOne({ tokenHash: peppered(`reset:${token}`), usedAt: null, expiresAt: { $gt: new Date() } }).populate('user', 'email status');

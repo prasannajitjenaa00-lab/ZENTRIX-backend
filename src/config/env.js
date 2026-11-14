@@ -84,7 +84,7 @@ function loadConfig(env = process.env) {
     mail: {
       host: smtpHost, port: num(env.SMTP_PORT, 587), secure: bool(env.SMTP_SECURE, false),
       user: env.SMTP_USER || '', pass: env.SMTP_PASS || '',
-      from: env.MAIL_FROM || 'Zentrix Pulse <no-reply@localhost>',
+      from: env.MAIL_FROM || 'Zentrix Projects <no-reply@localhost>',
       devPreview: (devMailPreview && !isProd) || (allowDevMailInProd && !smtpHost),
     },
   });

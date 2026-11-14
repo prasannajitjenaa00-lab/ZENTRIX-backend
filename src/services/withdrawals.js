@@ -11,8 +11,7 @@ async function getMyWithdrawals(user) {
   const pkg = u?.package;
   const currency = pkg?.currency || '₹';
 
-  const baseEarnings = pkg?.amount || 0;
-  const ratePerHour = pkg?.ratePerHour || (baseEarnings ? Math.round(baseEarnings / 20) : 200);
+  const ratePerHour = pkg?.ratePerHour || 200;
 
   // Completed translations and total audio duration
   const completedAssignments = await TrackAssignment.find({
@@ -31,9 +30,10 @@ async function getMyWithdrawals(user) {
     totalDurationSec += dur;
   }
 
-  // Audio earnings calculated by per hour price
-  const taskEarnings = Math.round((totalDurationSec / 3600) * ratePerHour);
-  const totalEarned = baseEarnings + taskEarnings;
+  // Withdrawable earnings are strictly work-based: completed audio duration × rate per hour.
+  // The package's flat base amount is not withdrawable (see Dashboard for the combined wallet figure).
+  const audioEarnings = Math.round((totalDurationSec / 3600) * ratePerHour);
+  const totalEarned = audioEarnings;
 
   const records = await Withdrawal.find({ user: user._id }).sort({ requestedAt: -1 }).lean();
 
@@ -65,6 +65,9 @@ async function getMyWithdrawals(user) {
     totalEarned,
     totalWithdrawn,
     pendingAmount,
+    ratePerHour,
+    totalDurationSec,
+    audioEarnings,
     bank,
     withdrawals,
   };
